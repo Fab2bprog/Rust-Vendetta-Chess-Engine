@@ -1,0 +1,34 @@
+# Rapport SPRT VendettaChess (point de vue B = candidat)
+statut              = SPRT_CONCLU_FAIL
+verdict             = retirer la modif (pas de gain)
+
+parties             = 4259
+B_gagnees           = 1391
+nulles              = 1471
+B_perdues           = 1397
+
+elo_estime          = -0.5
+elo_demi_marge_95   = 8.4
+
+llr                 = -2.957
+llr_borne_pass      = 2.944
+llr_borne_fail      = -2.944
+
+# Rappel de la config testée
+config_nodes_a      = 20000
+config_nodes_b      = 20000
+config_improving_a  = true
+config_improving_b  = true
+config_futility_a   = true
+config_futility_b   = true
+config_lmr_a        = true
+config_lmr_b        = true
+config_correction_a = true
+config_correction_b = true
+config_king_attack_a = false
+config_king_attack_b = true
+config_elo0         = 0
+config_elo1         = 10
+config_alpha        = 0.05
+config_beta         = 0.05
+config_games_max    = 5000

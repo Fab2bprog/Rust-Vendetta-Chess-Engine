@@ -1,0 +1,20 @@
+# =============================================================================
+# Vendetta Chess Motor — configuration Cargo locale
+#
+# target-cpu=native : autorise le compilateur à utiliser TOUTES les instructions
+# du processeur de COMPILATION (ici l'Apple M2 Pro, aarch64), au lieu de se
+# limiter au sous-ensemble de base d'aarch64 garanti portable. Un moteur d'échecs
+# profite des instructions bit-à-bit spécialisées (popcount, count-leading-zeros,
+# etc.) appelées des milliards de fois par seconde — d'où un gain de NPS.
+#
+# Pure VITESSE : aucun changement de résultat de recherche, donc zéro Elo perdu.
+#
+# ⚠️ Portabilité : le binaire produit n'est PLUS garanti de tourner sur un
+# processeur plus ancien ou différent de celui qui l'a compilé. C'est sans
+# importance pour un build local utilisé sur la même machine. Pour produire un
+# binaire distribuable (GitHub release), compiler SANS ce fichier (ou le retirer
+# temporairement), afin de viser le sous-ensemble portable d'aarch64.
+# =============================================================================
+
+[build]
+rustflags = ["-C", "target-cpu=native"]

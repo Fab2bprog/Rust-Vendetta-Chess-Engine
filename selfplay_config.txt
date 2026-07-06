@@ -1,0 +1,59 @@
+# =====================================================================
+# Config de test SPRT — VendettaChess self-play (format clé = valeur)
+# Convention : A = référence, B = candidat.  PASS = la modif de B ajoute de l'Elo.
+# Réglage RAPIDE pour un premier run (peu de nœuds, plafond modeste).
+# =====================================================================
+
+# --- Feature testée : "Sécurité du roi par l'attaque" (king attack) ---
+#     B avec, A sans. IMPORTANT : tout le reste DOIT être identique entre A et B
+#     pour isoler l'effet du king attack.
+king_attack_a = false
+king_attack_b = true
+
+# --- Autres features : IDENTIQUES des deux côtés (non testées ici) ---
+improving_a = true
+improving_b = true
+futility_a = true
+futility_b = true
+lmr_a = true
+lmr_b = true
+correction_a = true
+correction_b = true
+
+# --- Budget de recherche par coup (nœuds). Le king attack est un terme
+#     positionnel de milieu de partie, visible à profondeur modérée → 20000
+#     (bon compromis vitesse/représentativité). ---
+nodes_a = 20000
+nodes_b = 20000
+
+# --- Plafond de parties (arrêt si pas de conclusion avant). Le SPRT s'arrête
+#     dès qu'il conclut PASS/FAIL, donc ce plafond n'est qu'un filet de sécurité. ---
+games_max = 5000
+
+# --- Parties jouées EN PARALLÈLE. 1 cœur actif par partie. 8 occupe ~8 cœurs
+#     sur le M2 Pro (10 cœurs) en laissant de la marge pour le thread principal
+#     et l'OS. Mets 1 pour du séquentiel, 4 pour un réglage plus tranquille. ---
+concurrency = 8
+
+# --- Bornes du test SPRT (elo1=10 : on cherche à confirmer un gain franc du
+#     king attack reréglé, pas un effet marginal) ---
+elo0  = 0
+elo1  = 10
+alpha = 0.05
+beta  = 0.05
+
+# --- Fichier de rapport (écrit à la fin + autosauvegardé en cours) ---
+report = rapport_selfplay.txt
+
+# =====================================================================
+# CONTRÔLES DE FIABILITÉ — à lancer AVANT de croire un vrai test :
+#
+#  1) A contre A  → doit donner Elo ~0 et statut FAIL.
+#     (mettre king_attack_a IDENTIQUE à king_attack_b, ex. les deux à true)
+#       king_attack_a = true
+#       king_attack_b = true
+#
+#  2) A contre version affaiblie → doit donner Elo très négatif, FAIL.
+#     (B cherche beaucoup moins de nœuds → plus faible)
+#       nodes_b = 3000
+# =====================================================================
