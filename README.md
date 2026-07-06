@@ -24,7 +24,7 @@ Vendetta Chess Motor a été développé **en coworking avec Claude** (Anthropic
 
 ## Niveau de jeu estimé
 
-**~2 600 Elo** — niveau Grand Maître fort, capable de battre la quasi-totalité des joueurs humains.
+**~2 400 Elo** — niveau Grand Maître fort, capable de battre la quasi-totalité des joueurs humains.
 
 Estimation confirmée empiriquement par une série de parties contre Stockfish
 à Elo limité (victoires obtenues successivement aux paliers 2100, 2300 puis
