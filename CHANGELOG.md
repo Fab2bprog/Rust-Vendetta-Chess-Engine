@@ -25,7 +25,6 @@ an Elo measurement framework and hardened the test tooling.
 - **Self-play SPRT testing tool** (`selfplay` binary) — objectively measures
   the Elo gain of a change by having the engine play against itself (two
   variants A/B), parallelized, **zero dependencies** (custom parsing/PRNG/SPRT).
-  See `COMMENT_TESTER_SPRT.md`.
 - **Runtime search toggles** grouped in `FeatureToggles`
   (`SearchInfo.toggles`) — allow isolating a heuristic for an A/B test
   without recompiling or affecting normal play (zero NPS cost): `improving`,
@@ -47,8 +46,7 @@ an Elo measurement framework and hardened the test tooling.
   from an absurd config value.
 - `selfplay`: anti-spam display — progress is only reprinted when the
   game counter actually advances.
-- `selfplay`: fixed an outdated header comment (now points to
-  `COMMENT_TESTER_SPRT.md`).
+- `selfplay`: fixed an outdated header comment.
 - Robustness/crash/cleanliness audit from 2026-06-26 — no critical bug found;
   see `AUDIT_STABILITE_2026-06-26.md`.
 
