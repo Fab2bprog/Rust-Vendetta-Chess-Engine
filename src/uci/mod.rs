@@ -58,9 +58,7 @@ use parser::{parse_command, parse_move_uci, UciCommand};
 /// Engine name and version.
 pub const ENGINE_NAME:    &str = "Vendetta Chess Engine";
 pub const ENGINE_VERSION: &str = "1.1.2";
-/// Project author. Developed in coworking with Claude (Anthropic) — see
-/// the "Acknowledgments" section of README.md for the honest details of this
-/// human/AI collaboration.
+/// Project author.
 pub const ENGINE_AUTHOR:  &str = "Fabrice Garcia";
 
 /// Main UCI engine.
@@ -531,11 +529,8 @@ impl UciEngine {
 
         // UCI_EngineAbout: cosmetic information about the engine, with no
         // functional effect — UCI convention for displaying author/license/link.
-        // Original author = ENGINE_AUTHOR (Fabrice Garcia); the engine was
-        // developed in co-working with Claude (Anthropic), mentioned here
-        // as a contributor for the sake of honesty.
         println!(
-            "option name UCI_EngineAbout type string default {} {} - Auteur initial: {} - Contributeur: Claude (Anthropic) - GPL-3.0",
+            "option name UCI_EngineAbout type string default {} {} - Auteur initial: {} - MIT License",
             ENGINE_NAME, ENGINE_VERSION, ENGINE_AUTHOR
         );
         println!();
