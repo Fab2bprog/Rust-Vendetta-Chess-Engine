@@ -123,7 +123,7 @@ pub fn evaluate_opt(board: &Board, king_attack: bool) -> i32 {
 /// Reasonable initial value, consistent with typical values used
 /// by other engines (10-30 cp) — to be refined by Texel Tuning if a
 /// future version extends the tuner to this parameter (not currently included,
-/// like threats.rs — see CLAUDE.md "Future work").
+/// like threats.rs — see ARCHITECTURE.md "Future work under consideration").
 const TEMPO_BONUS: i32 = 10;
 
 /// Checks whether the position is drawn due to insufficient material to mate.

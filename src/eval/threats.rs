@@ -43,7 +43,7 @@ use crate::utils::types::{Color, Piece};
 /// Penalty for a piece attacked by an opposing piece of lesser value
 /// (regardless of any defense). Reasonable initial value — like the
 /// rest of the positional evaluation, to be refined via Texel Tuning (possible
-/// v5, see CLAUDE.md "Future work").
+/// v5, see ARCHITECTURE.md "Future work under consideration").
 const THREATENED_BY_LESSER_PENALTY: i32 = 25;
 
 /// Additional penalty for a piece attacked and totally un

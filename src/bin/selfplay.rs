@@ -6,7 +6,7 @@
 //        variants A and B, without UCI or subprocesses).
 //
 // Workflow (full instructions: COMMENT_TESTER_SPRT.md):
-//   1. A `key = value` config file describes the test (prepared by you/Claude).
+//   1. A `key = value` config file describes the test (prepared by you).
 //   2. This binary plays A against B in fast games (fixed nodes per move),
 //      from random openings (alternating colors for fairness).
 //   3. The SPRT stops on its own as soon as it concludes (PASS / FAIL), or at the cap.

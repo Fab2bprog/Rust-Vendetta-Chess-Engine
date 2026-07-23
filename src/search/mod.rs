@@ -963,7 +963,7 @@ fn compute_time_limit(board: &Board, config: &SearchConfig) -> Duration {
 /// Minimum and maximum Elo covered by the UCI_Elo → skill_level conversion.
 /// ELO_MAX = ~2600, consistent with the measured playing strength of Vendetta Chess Engine
 /// (confirmed wins against Stockfish at 2500 Elo limited after the Texel
-/// Tuning v3 — see CLAUDE.md / README.md). ELO_MIN = 600, reasonable
+/// Tuning v3 — see README.md). ELO_MIN = 600, reasonable
 /// lower bound for an "absolute beginner" (skill_level = 1).
 pub const ELO_MIN: u16 = 600;
 pub const ELO_MAX: u16 = 2600;
