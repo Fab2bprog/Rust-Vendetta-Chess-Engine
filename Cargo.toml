@@ -2,10 +2,19 @@
 name = "vendetta-chess-motor"
 version = "1.1.2"
 edition = "2021"
-authors = ["Fabrice Garcia <fabgarcia2b@hotmail.fr>"]
+authors = ["Fabrice Garcia"]
 description = "Professional chess engine in Rust - 100% UCI compatible"
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/Fab2bprog/Rust-Vendetta-Chess-Motor"
+keywords = ["chess", "chess-engine", "uci", "alpha-beta", "bitboard"]
+categories = ["games", "algorithms", "command-line-utilities"]
+exclude = [
+    ".cargo/",
+    ".DS_Store",
+    "src/.DS_Store",
+    "*.tar.gz",
+]
 
 # No external dependencies for the base engine.
 # Project philosophy: stability and correctness before performance.
