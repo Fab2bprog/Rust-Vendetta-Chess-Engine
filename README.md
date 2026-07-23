@@ -2,7 +2,7 @@
 
 **Vendetta Chess Motor** is a professional chess engine written entirely in Rust, compatible with the UCI (*Universal Chess Interface*) protocol. It can be used with any UCI-compatible graphical interface: Arena, CuteChess, Scid, Lichess BOT, etc.
 
-> **Version 1.1.2** · GPL-3.0 License · Pure Rust, no external dependencies
+> **Version 1.1.2** · MIT License · Pure Rust, no external dependencies
 
 ---
 
@@ -154,7 +154,7 @@ cd vendetta_chess_motor
 cargo build --release
 ```
 
-The binary is produced at `target/release/vendetta_chess_motor`.
+The binary is produced at `target/release/vendetta-chess-motor`.
 
 ### Native Apple Silicon build
 
@@ -169,7 +169,7 @@ cargo build --release --target aarch64-apple-darwin
 Vendetta Chess Motor is a pure UCI engine — it has no graphical interface of its own. It is used with UCI-compatible software:
 
 1. Build the engine in release mode
-2. In your graphical interface (Arena, CuteChess, Scid, etc.), add a new engine pointing to the `vendetta_chess_motor` binary
+2. In your graphical interface (Arena, CuteChess, Scid, etc.), add a new engine pointing to the `vendetta-chess-motor` binary
 3. The engine identifies itself as: `id name Vendetta Chess Motor 1.1.2`
 
 ### UCI options
@@ -333,8 +333,8 @@ src/
 
 ## License
 
-Vendetta Chess Motor is distributed under the **GNU General Public License v3.0 (GPL-3.0-or-later)**.
+Vendetta Chess Motor is distributed under the **MIT License**.
 
-You are free to use, modify, and redistribute it under the terms of this license. Any distribution of derivative software must be done under the same GPL-3.0 license and include the complete source code.
+You are free to use, modify, distribute, and even sublicense or sell copies of the software, in both open-source and closed-source/commercial projects, as long as the original copyright notice and this permission notice are included in all copies or substantial portions of the software. The software is provided "as is", without warranty of any kind.
 
-See: https://www.gnu.org/licenses/gpl-3.0.html
+See: [LICENSE](LICENSE)

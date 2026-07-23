@@ -1,6 +1,6 @@
 # Vendetta Chess Motor Architecture
 
-> Version 1.1.2 · GPL-3.0 License
+> Version 1.1.2 · MIT License
 
 ## Overview
 

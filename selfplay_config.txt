@@ -1,16 +1,16 @@
 # =====================================================================
-# Config de test SPRT — VendettaChess self-play (format clé = valeur)
-# Convention : A = référence, B = candidat.  PASS = la modif de B ajoute de l'Elo.
-# Réglage RAPIDE pour un premier run (peu de nœuds, plafond modeste).
+# SPRT test config — Vendetta Chess Motor self-play (key = value format)
+# Convention: A = reference, B = candidate.  PASS = B's change adds Elo.
+# FAST setting for a first run (few nodes, modest cap).
 # =====================================================================
 
-# --- Feature testée : "Sécurité du roi par l'attaque" (king attack) ---
-#     B avec, A sans. IMPORTANT : tout le reste DOIT être identique entre A et B
-#     pour isoler l'effet du king attack.
+# --- Feature under test: "King safety via attack" (king attack) ---
+#     B with it, A without. IMPORTANT: everything else MUST be identical
+#     between A and B to isolate the king attack effect.
 king_attack_a = false
 king_attack_b = true
 
-# --- Autres features : IDENTIQUES des deux côtés (non testées ici) ---
+# --- Other features: IDENTICAL on both sides (not tested here) ---
 improving_a = true
 improving_b = true
 futility_a = true
@@ -20,40 +20,40 @@ lmr_b = true
 correction_a = true
 correction_b = true
 
-# --- Budget de recherche par coup (nœuds). Le king attack est un terme
-#     positionnel de milieu de partie, visible à profondeur modérée → 20000
-#     (bon compromis vitesse/représentativité). ---
+# --- Search budget per move (nodes). King attack is a middlegame
+#     positional term, visible at moderate depth → 20000
+#     (good speed/representativeness trade-off). ---
 nodes_a = 20000
 nodes_b = 20000
 
-# --- Plafond de parties (arrêt si pas de conclusion avant). Le SPRT s'arrête
-#     dès qu'il conclut PASS/FAIL, donc ce plafond n'est qu'un filet de sécurité. ---
+# --- Game cap (stops if no conclusion is reached before then). SPRT stops
+#     as soon as it reaches PASS/FAIL, so this cap is just a safety net. ---
 games_max = 5000
 
-# --- Parties jouées EN PARALLÈLE. 1 cœur actif par partie. 8 occupe ~8 cœurs
-#     sur le M2 Pro (10 cœurs) en laissant de la marge pour le thread principal
-#     et l'OS. Mets 1 pour du séquentiel, 4 pour un réglage plus tranquille. ---
+# --- Games played IN PARALLEL. 1 active core per game. 8 uses ~8 cores
+#     on the M2 Pro (10 cores), leaving headroom for the main thread
+#     and the OS. Use 1 for sequential, 4 for a gentler setting. ---
 concurrency = 8
 
-# --- Bornes du test SPRT (elo1=10 : on cherche à confirmer un gain franc du
-#     king attack reréglé, pas un effet marginal) ---
+# --- SPRT test bounds (elo1=10: we're looking to confirm a clear gain
+#     from the retuned king attack, not a marginal effect) ---
 elo0  = 0
 elo1  = 10
 alpha = 0.05
 beta  = 0.05
 
-# --- Fichier de rapport (écrit à la fin + autosauvegardé en cours) ---
+# --- Report file (written at the end + autosaved along the way) ---
 report = rapport_selfplay.txt
 
 # =====================================================================
-# CONTRÔLES DE FIABILITÉ — à lancer AVANT de croire un vrai test :
+# RELIABILITY CHECKS — run these BEFORE trusting a real test:
 #
-#  1) A contre A  → doit donner Elo ~0 et statut FAIL.
-#     (mettre king_attack_a IDENTIQUE à king_attack_b, ex. les deux à true)
+#  1) A vs A → should give Elo ~0 and status FAIL.
+#     (set king_attack_a IDENTICAL to king_attack_b, e.g. both true)
 #       king_attack_a = true
 #       king_attack_b = true
 #
-#  2) A contre version affaiblie → doit donner Elo très négatif, FAIL.
-#     (B cherche beaucoup moins de nœuds → plus faible)
+#  2) A vs a weakened version → should give a strongly negative Elo, FAIL.
+#     (B searches far fewer nodes → weaker)
 #       nodes_b = 3000
 # =====================================================================

@@ -1,23 +1,23 @@
-# Contribuer à Vendetta Chess Motor
+# Contributing to Vendetta Chess Motor
 
-Bienvenue ! Vendetta Chess Motor est un projet open source francophone.
-Toute contribution est la bienvenue.
+Welcome! Vendetta Chess Motor is an open source project.
+Contributions are welcome.
 
 ## Conventions
 
-- **Noms de fichiers, fonctions, variables, structs** : en anglais (convention Rust)
-- **Commentaires et documentation** : en français
-- **Chaque fichier** commence par un bloc de commentaire détaillé en français
-- **Chaque fonction** est documentée en français
+- **File, function, variable, and struct names**: in English (Rust convention)
+- **Comments and documentation**: in English
+- **Each file** starts with a detailed comment block in English
+- **Each function** is documented in English
 
-## Philosophie
+## Philosophy
 
-Stabilité et correction avant performance.
-Un code simple et lisible vaut mieux qu'un code brillant mais fragile.
+Stability and correctness before performance.
+Simple, readable code beats clever but fragile code.
 
-## Avant de soumettre
+## Before submitting
 
-- `cargo build` sans erreur ni warning
-- `cargo test` qui passe
-- Code commenté en français
-- Fonctions documentées
+- `cargo build` with no errors or warnings
+- `cargo test` passing
+- Code commented in English
+- Functions documented

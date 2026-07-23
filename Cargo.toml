@@ -1,18 +1,18 @@
 [package]
-name = "vendetta_chess_motor"
+name = "vendetta-chess-motor"
 version = "1.1.2"
 edition = "2021"
 authors = ["Fabrice Garcia <fabgarcia2b@hotmail.fr>"]
-description = "Moteur d'échecs professionnel en Rust - 100% compatible UCI"
-license = "GPL-3.0-or-later"
+description = "Professional chess engine in Rust - 100% UCI compatible"
+license = "MIT"
 readme = "README.md"
 
-# Aucune dépendance externe pour le moteur de base.
-# Philosophie du projet : stabilité et correction avant performance.
+# No external dependencies for the base engine.
+# Project philosophy: stability and correctness before performance.
 [dependencies]
 
 [[bin]]
-name = "vendetta_chess_motor"
+name = "vendetta-chess-motor"
 path = "src/main.rs"
 
 [[bin]]
@@ -37,17 +37,17 @@ path = "src/bin/selfplay.rs"
 
 [profile.release]
 opt-level = 3
-# Link-Time Optimization : optimisation inter-modules au moment de l'édition de
-# liens. Permet l'inlining et l'élagage entre crates/modules que le codegen par
-# unité ne voit pas. Gain typique mesuré sur un moteur d'échecs : +5 à +15 % NPS.
-# Aucun impact sur la LOGIQUE (résultats de recherche identiques) — donc zéro Elo
-# perdu, et même un gain d'Elo à temps fixe (recherche plus profonde).
+# Link-Time Optimization: cross-module optimization at link time.
+# Enables inlining and pruning across crates/modules that per-unit codegen
+# can't see. Typical gain measured on a chess engine: +5 to +15% NPS.
+# No impact on LOGIC (identical search results) — so zero Elo lost,
+# and even an Elo gain at fixed time (deeper search).
 lto = true
-# Une seule unité de codegen : le compilateur optimise tout le crate d'un bloc
-# (au prix d'une compilation plus lente). Se combine avec LTO pour le meilleur
-# code possible. Là encore, pure vitesse, zéro changement de comportement.
+# A single codegen unit: the compiler optimizes the whole crate as one block
+# (at the cost of slower compilation). Combines with LTO for the best
+# possible code. Again, pure speed, zero change in behavior.
 codegen-units = 1
-# Note : `panic = "abort"` apporterait un petit gain supplémentaire (suppression
-# des "landing pads" de déroulement), mais il est volontairement OMIS ici car il
-# interfère avec `cargo test` (le harness de test a besoin du déroulement de pile)
-# et avec le `panic!` diagnostique de magic.rs. Le gain ne justifie pas ce risque.
+# Note: `panic = "abort"` would provide a small additional gain (removing
+# unwind "landing pads"), but it is deliberately OMITTED here because it
+# interferes with `cargo test` (the test harness needs stack unwinding)
+# and with the diagnostic `panic!` in magic.rs. The gain doesn't justify that risk.

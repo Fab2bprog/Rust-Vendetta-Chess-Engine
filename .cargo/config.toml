@@ -1,19 +1,19 @@
 # =============================================================================
-# Vendetta Chess Motor — configuration Cargo locale
+# Vendetta Chess Motor — local Cargo configuration
 #
-# target-cpu=native : autorise le compilateur à utiliser TOUTES les instructions
-# du processeur de COMPILATION (ici l'Apple M2 Pro, aarch64), au lieu de se
-# limiter au sous-ensemble de base d'aarch64 garanti portable. Un moteur d'échecs
-# profite des instructions bit-à-bit spécialisées (popcount, count-leading-zeros,
-# etc.) appelées des milliards de fois par seconde — d'où un gain de NPS.
+# target-cpu=native: allows the compiler to use ALL instructions of the
+# COMPILING processor (here an Apple M2 Pro, aarch64), instead of sticking
+# to the guaranteed-portable base subset of aarch64. A chess engine benefits
+# from specialized bitwise instructions (popcount, count-leading-zeros,
+# etc.) called billions of times per second — hence a gain in NPS.
 #
-# Pure VITESSE : aucun changement de résultat de recherche, donc zéro Elo perdu.
+# Pure SPEED: no change in search results, so zero Elo lost.
 #
-# ⚠️ Portabilité : le binaire produit n'est PLUS garanti de tourner sur un
-# processeur plus ancien ou différent de celui qui l'a compilé. C'est sans
-# importance pour un build local utilisé sur la même machine. Pour produire un
-# binaire distribuable (GitHub release), compiler SANS ce fichier (ou le retirer
-# temporairement), afin de viser le sous-ensemble portable d'aarch64.
+# ⚠️ Portability: the resulting binary is NO LONGER guaranteed to run on an
+# older or different processor than the one that compiled it. This doesn't
+# matter for a local build used on the same machine. To produce a
+# distributable binary (GitHub release), compile WITHOUT this file (or
+# temporarily remove it), to target the portable aarch64 subset.
 # =============================================================================
 
 [build]
