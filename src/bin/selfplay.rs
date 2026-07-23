@@ -1,26 +1,26 @@
 // =============================================================================
 // Vendetta Chess Motor — src/bin/selfplay.rs
 //
-// Rôle : Mesurer si une modification du moteur AJOUTE de l'Elo, par un test
-//        SPRT en self-play interne (le moteur joue contre lui-même, deux
-//        variantes A et B, sans UCI ni sous-processus).
+// Role: Measure whether a change to the engine ADDS Elo, via a test
+//        SPRT in internal self-play (the engine plays against itself, two
+//        variants A and B, without UCI or subprocesses).
 //
-// Workflow (mode d'emploi complet : COMMENT_TESTER_SPRT.md) :
-//   1. Un fichier de config `clé = valeur` décrit le test (préparé par toi/Claude).
-//   2. Ce binaire joue A contre B en parties rapides (nœuds fixes par coup),
-//      depuis des ouvertures aléatoires (couleurs alternées pour l'équité).
-//   3. Le SPRT s'arrête tout seul dès qu'il conclut (PASS / FAIL), ou au plafond.
-//   4. Un rapport `clé = valeur` est écrit (et ré-écrit régulièrement = autosave).
+// Workflow (full instructions: COMMENT_TESTER_SPRT.md):
+//   1. A `key = value` config file describes the test (prepared by you/Claude).
+//   2. This binary plays A against B in fast games (fixed nodes per move),
+//      from random openings (alternating colors for fairness).
+//   3. The SPRT stops on its own as soon as it concludes (PASS / FAIL), or at the cap.
+//   4. A `key = value` report is written (and rewritten regularly = autosave).
 //
-// Arrêt propre : crée un fichier `STOP` dans le dossier courant
-//   (`touch STOP`) → le programme finit la partie en cours, écrit un rapport
-//   final marqué "INTERROMPU", supprime STOP, et se termine.
+// Clean stop: create a `STOP` file in the current directory
+//   (`touch STOP`) → the program finishes the current game, writes a
+//   final report marked "INTERRUPTED", deletes STOP, and exits.
 //
-// Lancement :
+// Launch:
 //   cargo run --release --bin selfplay -- <config.txt>
-//   (défaut : selfplay_config.txt)
+//   (default: selfplay_config.txt)
 //
-// Zéro dépendance externe (parsing maison, PRNG maison, SPRT maison).
+// Zero external dependencies (custom parsing, custom PRNG, custom SPRT).
 // =============================================================================
 
 use std::env;
@@ -44,39 +44,39 @@ use vendetta_chess_motor::moves::generate_legal_moves;
 use vendetta_chess_motor::game::Game;
 use vendetta_chess_motor::game::rules::GameResult;
 
-// --- Constantes internes -----------------------------------------------------
-const SELFPLAY_TT_MB:     usize = 8;   // petite TT par camp (recherche peu profonde)
-const SELFPLAY_MAX_DEPTH: i32   = 64;  // borne de l'iterative deepening (le nœud-limit coupe avant)
-const OPENING_PLIES:      usize = 8;   // demi-coups aléatoires en ouverture (variété)
-const MAX_PLIES:          usize = 400; // garde-fou anti-partie infinie → nulle
-const POLL_MS:            u64   = 500; // intervalle de scrutation du thread principal (ms)
-const MAX_CONCURRENCY:    usize = 64;  // garde-fou : borne haute du parallélisme (anti-OOM)
+// --- Internal constants -----------------------------------------------------
+const SELFPLAY_TT_MB:     usize = 8;   // small TT per side (shallow search)
+const SELFPLAY_MAX_DEPTH: i32   = 64;  // bound of the iterative deepening (the node limit cuts it off before that)
+const OPENING_PLIES:      usize = 8;   // random half-moves in the opening (variety)
+const MAX_PLIES:          usize = 400; // safeguard against infinite games → draw
+const POLL_MS:            u64   = 500; // polling interval of the main thread (ms)
+const MAX_CONCURRENCY:    usize = 64;  // safeguard: upper bound on parallelism (anti-OOM)
 const STOP_FILE:          &str  = "STOP";
 
 // =============================================================================
-// Configuration (fichier clé = valeur)
+// Configuration (key = value file)
 // =============================================================================
 
 struct Config {
-    nodes_a:     u64,   // nœuds par coup, variante A (référence)
-    nodes_b:     u64,   // nœuds par coup, variante B (candidat)
-    improving_a: bool,  // feature "improving" activée pour A ?
-    improving_b: bool,  // feature "improving" activée pour B ?
-    futility_a:  bool,  // Futility Pruning par coup activé pour A ?
-    futility_b:  bool,  // Futility Pruning par coup activé pour B ?
-    lmr_a:       bool,  // LMR enrichie (ajustements ±1) activée pour A ?
-    lmr_b:       bool,  // LMR enrichie (ajustements ±1) activée pour B ?
-    correction_a: bool, // Correction History activée pour A ?
-    correction_b: bool, // Correction History activée pour B ?
-    king_attack_a: bool, // Sécurité du roi par l'attaque activée pour A ?
-    king_attack_b: bool, // Sécurité du roi par l'attaque activée pour B ?
-    games_max:   u64,   // plafond de parties (arrêt si atteint sans conclusion)
-    elo0:        f64,   // borne SPRT basse
-    elo1:        f64,   // borne SPRT haute
-    alpha:       f64,   // risque de 1re espèce
-    beta:        f64,   // risque de 2e espèce
-    concurrency: usize, // nb de parties jouées EN PARALLÈLE (0/1 = séquentiel)
-    report:      String,// fichier de rapport
+    nodes_a:     u64,   // nodes per move, variant A (reference)
+    nodes_b:     u64,   // nodes per move, variant B (candidate)
+    improving_a: bool,  // "improving" feature enabled for A?
+    improving_b: bool,  // "improving" feature enabled for B?
+    futility_a:  bool,  // Futility Pruning per move enabled for A?
+    futility_b:  bool,  // Futility Pruning per move enabled for B?
+    lmr_a:       bool,  // enriched LMR (±1 adjustments) enabled for A?
+    lmr_b:       bool,  // enriched LMR (±1 adjustments) enabled for B?
+    correction_a: bool, // Correction History enabled for A?
+    correction_b: bool, // Correction History enabled for B?
+    king_attack_a: bool, // King safety by attack enabled for A?
+    king_attack_b: bool, // King safety by attack enabled for B?
+    games_max:   u64,   // game cap (stop if reached without conclusion)
+    elo0:        f64,   // lower SPRT bound
+    elo1:        f64,   // upper SPRT bound
+    alpha:       f64,   // type I error risk
+    beta:        f64,   // type II error risk
+    concurrency: usize, // number of games played IN PARALLEL (0/1 = sequential)
+    report:      String,// report file
 }
 
 impl Config {
@@ -158,11 +158,11 @@ fn parse_config(path: &str) -> Config {
 }
 
 // =============================================================================
-// PRNG maison (pour les ouvertures aléatoires reproductibles)
+// custom PRNG (for reproducible random openings)
 // =============================================================================
 
 fn next_rand(state: &mut u64) -> u64 {
-    // LCG + mélange final (splitmix-like). Déterministe pour une graine donnée.
+    // LCG + final mixing (splitmix-like). Deterministic for a given seed.
     *state = state
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
@@ -174,7 +174,7 @@ fn next_rand(state: &mut u64) -> u64 {
 }
 
 // =============================================================================
-// État de recherche d'un camp (persistant sur toute une partie)
+// Search state of a side (persistent across an entire game)
 // =============================================================================
 
 struct SideState {
@@ -208,8 +208,8 @@ impl SideState {
         }
     }
 
-    /// Cherche le meilleur coup pour la position courante, dans la limite de
-    /// nœuds fixée. Réutilise ses tables (TT/history…) d'un coup à l'autre.
+    /// Finds the best move for the current position, within the
+    /// fixed node limit. Reuses its tables (TT/history…) from one move to the next.
     fn best_move(&mut self, board: &mut Board) -> Move {
         let mut info = SearchInfo::new_with_stop(
             Duration::from_secs(3600),
@@ -234,8 +234,8 @@ impl SideState {
                 &mut self.countermoves, &mut self.cont_history, Move::NULL,
                 &mut info, Move::NULL, &[],
             );
-            // Si la limite de nœuds a coupé EN COURS de profondeur, on garde le
-            // coup de la dernière profondeur COMPLÈTE (déjà dans `chosen`).
+            // If the node limit cut off WHILE a depth was in progress, we keep the
+            // move from the last COMPLETE depth (already in `chosen`).
             if info.should_stop() {
                 break;
             }
@@ -243,10 +243,10 @@ impl SideState {
         }
 
         if chosen.is_null() {
-            chosen = info.best_move; // résultat partiel d'une profondeur interrompue
+            chosen = info.best_move; // partial result of an interrupted depth
         }
         if chosen.is_null() {
-            // Ultime filet (ne devrait pas arriver si la position n'est pas terminale).
+            // Last-resort safety net (should not happen if the position is not terminal).
             let legal = generate_legal_moves(board);
             if !legal.is_empty() {
                 chosen = legal[0];
@@ -257,17 +257,17 @@ impl SideState {
 }
 
 // =============================================================================
-// Déroulement d'une partie
+// Course of a game
 // =============================================================================
 
-/// Construit une ouverture aléatoire reproductible (graine = numéro de paire).
+/// Builds a reproducible random opening (seed = pair number).
 fn random_opening(seed: u64) -> Game {
     let mut game = Game::new();
     let mut rng = seed ^ 0x9E3779B97F4A7C15;
     for _ in 0..OPENING_PLIES {
         let legal = generate_legal_moves(&mut game.board);
         if legal.is_empty() {
-            break; // position terminale atteinte (rare) — on s'arrête là
+            break; // terminal position reached (rare) — we stop there
         }
         let idx = (next_rand(&mut rng) as usize) % legal.len();
         game.make_move(legal[idx]);
@@ -275,26 +275,26 @@ fn random_opening(seed: u64) -> Game {
     game
 }
 
-/// Joue une partie complète depuis `game`. `a_is_white` indique la couleur de A.
-/// Retourne le résultat DU POINT DE VUE DE B (le candidat) :
-///   +1 = B gagne, 0 = nulle, -1 = B perd.
+/// Plays a complete game from `game`. `a_is_white` indicates A's color.
+/// Returns the result FROM B's POINT OF VIEW (the candidate):
+///   +1 = B wins, 0 = draw, -1 = B loses.
 fn play_out(mut game: Game, a_is_white: bool, side_a: &mut SideState, side_b: &mut SideState) -> i32 {
     let mut plies = 0usize;
     loop {
         match game.result() {
             GameResult::Ongoing => {}
             GameResult::Checkmate => {
-                // Le camp au trait est maté → il perd.
+                // The side to move is checkmated → it loses.
                 let loser_is_white = game.board.side_to_move == Color::White;
                 let b_is_white     = !a_is_white;
                 let b_loses        = loser_is_white == b_is_white;
                 return if b_loses { -1 } else { 1 };
             }
-            _ => return 0, // toute nulle (50 coups, répétition, matériel, pat)
+            _ => return 0, // any draw (50-move rule, repetition, material, stalemate)
         }
 
         if plies >= MAX_PLIES {
-            return 0; // garde-fou : partie trop longue → nulle
+            return 0; // safeguard: game too long → draw
         }
 
         let stm_is_white = game.board.side_to_move == Color::White;
@@ -307,16 +307,16 @@ fn play_out(mut game: Game, a_is_white: bool, side_a: &mut SideState, side_b: &m
         };
 
         if mv.is_null() {
-            return 0; // sécurité : aucun coup trouvé (ne devrait pas arriver)
+            return 0; // safety: no move found (should not happen)
         }
         game.make_move(mv);
         plies += 1;
     }
 }
 
-/// Joue UNE partie complète et autonome (crée ses propres camps). Sert d'unité
-/// de travail aux threads parallèles. `seed` fixe l'ouverture, `a_white` la
-/// couleur de A. Retourne +1/0/-1 du point de vue de B.
+/// Plays ONE complete, self-contained game (creates its own sides). Serves as the unit
+/// of work for parallel threads. `seed` fixes the opening, `a_white` the
+/// color of A. Returns +1/0/-1 from B's point of view.
 fn play_one_game(seed: u64, a_white: bool, cfg: &Config) -> i32 {
     let game = random_opening(seed);
     let mut side_a = SideState::new(cfg.nodes_a, !cfg.improving_a, !cfg.futility_a, !cfg.lmr_a, !cfg.correction_a, !cfg.king_attack_a);
@@ -325,7 +325,7 @@ fn play_one_game(seed: u64, a_white: bool, cfg: &Config) -> i32 {
 }
 
 // =============================================================================
-// Statistiques SPRT (modèle normal, du point de vue de B = candidat)
+// SPRT statistics (normal model, from B = candidate's point of view)
 // =============================================================================
 
 fn score_from_elo(elo: f64) -> f64 {
@@ -337,7 +337,7 @@ fn elo_from_score(s: f64) -> f64 {
     -400.0 * (1.0 / s - 1.0).log10()
 }
 
-/// Rapport de vraisemblance log (approximation normale).
+/// Log-likelihood ratio (normal approximation).
 fn llr(w: u64, d: u64, l: u64, elo0: f64, elo1: f64) -> f64 {
     let n = (w + d + l) as f64;
     if n == 0.0 {
@@ -346,16 +346,16 @@ fn llr(w: u64, d: u64, l: u64, elo0: f64, elo1: f64) -> f64 {
     let sum_x  = w as f64 + 0.5 * d as f64;        // Σ score
     let sum_x2 = w as f64 + 0.25 * d as f64;       // Σ score²
     let mean   = sum_x / n;
-    let var    = sum_x2 / n - mean * mean;          // variance par partie
+    let var    = sum_x2 / n - mean * mean;          // variance per game
     if var <= 1e-9 {
-        return 0.0; // pas d'information (que des nulles, etc.)
+        return 0.0; // no information (all draws, etc.)
     }
     let s0 = score_from_elo(elo0);
     let s1 = score_from_elo(elo1);
     (s1 - s0) / var * (sum_x - n * (s0 + s1) / 2.0)
 }
 
-/// Elo estimé et demi-marge (95 %).
+/// Estimated Elo and half-margin (95 %).
 fn elo_and_margin(w: u64, d: u64, l: u64) -> (f64, f64) {
     let n = (w + d + l) as f64;
     if n == 0.0 {
@@ -373,7 +373,7 @@ fn elo_and_margin(w: u64, d: u64, l: u64) -> (f64, f64) {
 }
 
 // =============================================================================
-// Affichage et rapport
+// Display and reporting
 // =============================================================================
 
 fn print_progress(cfg: &Config, w: u64, d: u64, l: u64, llr_val: f64, upper: f64, lower: f64) {
@@ -388,10 +388,10 @@ fn print_progress(cfg: &Config, w: u64, d: u64, l: u64, llr_val: f64, upper: f64
     );
 }
 
-// Fonction de SÉRIALISATION pure : chaque paramètre est un champ distinct et
-// nommé du rapport. Les regrouper dans une struct uniquement pour satisfaire le
-// lint n'apporterait aucune clarté ici — d'où l'autorisation explicite et
-// justifiée de dépasser le seuil d'arguments.
+// Pure SERIALIZATION function: each parameter is a distinct, named
+// field of the report. Grouping them into a struct solely to satisfy the
+// lint would add no clarity here — hence the explicit and
+// justified allowance to exceed the argument-count threshold.
 #[allow(clippy::too_many_arguments)]
 fn write_report(cfg: &Config, w: u64, d: u64, l: u64, llr_val: f64, upper: f64, lower: f64, statut: &str) {
     let n = w + d + l;
@@ -451,11 +451,11 @@ config_games_max    = {}
 }
 
 // =============================================================================
-// Point d'entrée
+// Entry point
 // =============================================================================
 
 fn main() {
-    // Initialisation OBLIGATOIRE des tables d'attaque / magic (comme perft/benchmark).
+    // MANDATORY initialization of the attack / magic tables (as in perft/benchmark).
     init_attack_tables();
 
     let args: Vec<String> = env::args().collect();
@@ -465,7 +465,7 @@ fn main() {
     let upper = ((1.0 - cfg.beta) / cfg.alpha).ln();
     let lower = (cfg.beta / (1.0 - cfg.alpha)).ln();
 
-    // Nettoyer un éventuel STOP résiduel d'un run précédent.
+    // Clean up any leftover STOP file from a previous run.
     let _ = fs::remove_file(STOP_FILE);
 
     println!("=== SPRT self-play Vendetta Chess Motor ===");
@@ -479,22 +479,22 @@ fn main() {
     println!("arrêt propre      : créer un fichier nommé '{}' (ex: touch {})", STOP_FILE, STOP_FILE);
     println!();
 
-    // --- État partagé entre threads (tout en atomique, zéro verrou) ----------
-    // Chaque partie est indépendante : ses propres camps, son propre échiquier.
-    // Le SEUL état partagé est ce bloc de compteurs atomiques.
+    // --- State shared between threads (all atomic, zero locks) ----------
+    // Each game is independent: its own sides, its own board.
+    // The ONLY shared state is this block of atomic counters.
     let cfg          = Arc::new(cfg);
-    let wins         = Arc::new(AtomicU64::new(0)); // B gagne
+    let wins         = Arc::new(AtomicU64::new(0)); // B wins
     let draws        = Arc::new(AtomicU64::new(0));
-    let losses       = Arc::new(AtomicU64::new(0)); // B perd
-    let game_counter = Arc::new(AtomicU64::new(0)); // index de la prochaine partie à jouer
+    let losses       = Arc::new(AtomicU64::new(0)); // B loses
+    let game_counter = Arc::new(AtomicU64::new(0)); // index of the next game to play
     let stop         = Arc::new(AtomicBool::new(false));
 
     let concurrency = cfg.concurrency.clamp(1, MAX_CONCURRENCY);
 
-    // --- Threads ouvriers : jouent des parties tant que `stop` est faux ------
-    // Index de partie g → ouverture seed = g/2, couleur a_white = (g pair).
-    // Ainsi chaque ouverture est jouée dans les deux sens (équité des couleurs),
-    // exactement comme l'ancien schéma de paires, mais réparti sur les threads.
+    // --- Worker threads: play games as long as `stop` is false ------
+    // Game index g → opening seed = g/2, color a_white = (g even).
+    // This way each opening is played in both directions (color fairness),
+    // exactly like the old pairing scheme, but spread across the threads.
     let mut handles = Vec::with_capacity(concurrency);
     for _ in 0..concurrency {
         let cfg          = Arc::clone(&cfg);
@@ -504,7 +504,7 @@ fn main() {
         let game_counter = Arc::clone(&game_counter);
         let stop         = Arc::clone(&stop);
         let h = thread::Builder::new()
-            .stack_size(8 * 1024 * 1024) // marge pour la récursion alpha-bêta
+            .stack_size(8 * 1024 * 1024) // margin for the alpha-beta recursion
             .spawn(move || {
                 loop {
                     if stop.load(Ordering::Relaxed) {
@@ -512,7 +512,7 @@ fn main() {
                     }
                     let g = game_counter.fetch_add(1, Ordering::Relaxed);
                     if g >= cfg.games_max {
-                        break; // ne pas démarrer au-delà du plafond
+                        break; // do not start beyond the cap
                     }
                     let seed    = g / 2;
                     let a_white = g.is_multiple_of(2);
@@ -527,13 +527,13 @@ fn main() {
         handles.push(h);
     }
 
-    // --- Thread principal : scrute, affiche, sauvegarde, décide de l'arrêt ---
-    // `statut` est assigné par CHAQUE branche de sortie de la boucle ci-dessous
-    // (la boucle ne sort que par `break`), donc pas de valeur initiale inutile.
+    // --- Main thread: polls, displays, saves, decides on the stop ---
+    // `statut` is assigned by EVERY exit branch of the loop below
+    // (the loop only exits via `break`), so no unnecessary initial value.
     let statut: String;
-    // Nombre de parties au dernier affichage : évite de réimprimer une ligne
-    // identique quand aucune partie ne s'est terminée entre deux scrutations
-    // (fréquent à gros budget de nœuds, où une partie dure plusieurs scrutations).
+    // Number of games at the last display: avoids reprinting an identical
+    // line when no game has finished between two polls
+    // (frequent with a large node budget, where a game lasts several polls).
     let mut last_reported = u64::MAX;
     loop {
         thread::sleep(Duration::from_millis(POLL_MS));
@@ -543,18 +543,18 @@ fn main() {
         let l = losses.load(Ordering::Relaxed);
         let llr_val = llr(w, d, l, cfg.elo0, cfg.elo1);
 
-        // Arrêt propre via fichier STOP.
+        // Clean stop via STOP file.
         if Path::new(STOP_FILE).exists() {
             statut = "INTERROMPU".to_string();
             let _ = fs::remove_file(STOP_FILE);
             break;
         }
-        // Plafond de parties atteint.
+        // Game cap reached.
         if w + d + l >= cfg.games_max {
             statut = "PLAFOND_ATTEINT".to_string();
             break;
         }
-        // SPRT conclu ?
+        // SPRT concluded?
         if llr_val >= upper {
             statut = "SPRT_CONCLU_PASS".to_string();
             break;
@@ -563,8 +563,8 @@ fn main() {
             statut = "SPRT_CONCLU_FAIL".to_string();
             break;
         }
-        // Progression + autosave — seulement si le compteur de parties a bougé,
-        // pour ne pas réimprimer une ligne identique (anti-spam).
+        // Progress + autosave — only if the game counter has moved,
+        // so as not to reprint an identical line (anti-spam).
         let n = w + d + l;
         if n != last_reported {
             last_reported = n;
@@ -573,13 +573,13 @@ fn main() {
         }
     }
 
-    // Signaler l'arrêt et attendre que les parties en cours se terminent.
+    // Signal the stop and wait for the games in progress to finish.
     stop.store(true, Ordering::Relaxed);
     for h in handles {
         let _ = h.join();
     }
 
-    // --- Rapport final (lecture après join : inclut les dernières parties) ---
+    // --- Final report (read after join: includes the last games) ---
     let w = wins.load(Ordering::Relaxed);
     let d = draws.load(Ordering::Relaxed);
     let l = losses.load(Ordering::Relaxed);

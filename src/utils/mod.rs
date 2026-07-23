@@ -1,16 +1,16 @@
 // =============================================================================
 // Vendetta Chess Motor — src/utils/mod.rs
 //
-// Rôle : Module utilitaires. Point d'entrée pour tous les types communs et
-//        fonctions partagées utilisées dans l'ensemble du projet.
+// Role: Utilities module. Entry point for all common types and
+//        functions shared throughout the entire project.
 //
-// Contenu :
-//   - Réexporte le module types (Color, Piece, Move, MoveFlags, constantes...)
+// Content:
+//   - Re-exports the types module (Color, Piece, Move, MoveFlags, constants...)
 // =============================================================================
 
 pub mod types;
 
-// Réexportation des types les plus utilisés pour simplifier les imports.
+// Re-export of the most commonly used types to simplify imports.
 pub use types::{
     Color, Piece, Move, MoveFlags,
     SCORE_INF, SCORE_MATE, SCORE_DRAW,

@@ -1,13 +1,13 @@
 // =============================================================================
 // Vendetta Chess Motor — src/game/mod.rs
 //
-// Rôle : Gestion de la partie en cours. Coordonne l'état du plateau, l'historique
-//        des positions, et la vérification des conditions de fin de partie.
+// Role: Manages the current game. Coordinates the board state, the history
+//        of positions, and checks the game-ending conditions.
 //
-// Contenu :
-//   - Game : structure principale de la partie
-//   - Jouer/annuler des coups avec suivi de l'historique
-//   - Détection des conditions de fin de partie
+// Contents:
+//   - Game: main structure of the game
+//   - Play/undo moves with history tracking
+//   - Detection of game-ending conditions
 // =============================================================================
 
 pub mod history;
@@ -19,16 +19,16 @@ use history::PositionHistory;
 use rules::{GameResult, check_draw};
 use crate::moves::{is_checkmate, is_stalemate};
 
-/// Représentation d'une partie d'échecs en cours.
+/// Representation of a chess game in progress.
 pub struct Game {
-    /// L'état actuel du plateau.
+    /// The current state of the board.
     pub board: Board,
-    /// Historique des hashs de position pour la détection de répétition.
+    /// History of position hashes for repetition detection.
     pub position_history: PositionHistory,
 }
 
 impl Game {
-    /// Crée une nouvelle partie à la position initiale.
+    /// Creates a new game at the initial position.
     pub fn new() -> Game {
         let board = Board::start_position();
         let hash  = board.hash;
@@ -41,7 +41,7 @@ impl Game {
         }
     }
 
-    /// Crée une partie depuis une FEN.
+    /// Creates a game from a FEN.
     pub fn from_fen(fen: &str) -> Result<Game, String> {
         let board = Board::from_fen(fen)?;
         let hash  = board.hash;
@@ -54,26 +54,26 @@ impl Game {
         })
     }
 
-    /// Joue un coup et met à jour l'historique.
+    /// Plays a move and updates the history.
     pub fn make_move(&mut self, mv: Move) {
         self.board.make_move(mv);
         self.position_history.push(self.board.hash);
     }
 
-    /// Annule le dernier coup joué.
+    /// Undoes the last move played.
     pub fn unmake_move(&mut self, mv: Move) {
         self.position_history.pop();
         self.board.unmake_move(mv);
     }
 
-    /// Vérifie le résultat actuel de la partie.
+    /// Checks the current result of the game.
     pub fn result(&mut self) -> GameResult {
-        // Vérifier d'abord les conditions de nulle simples (sans génération de coups)
+        // First check the simple draw conditions (without move generation)
         if let Some(result) = check_draw(&self.board, &self.position_history) {
             return result;
         }
 
-        // Vérifier mat et pat (nécessite la génération des coups)
+        // Check checkmate and stalemate (requires move generation)
         if is_checkmate(&mut self.board) {
             return GameResult::Checkmate;
         }
@@ -85,7 +85,7 @@ impl Game {
         GameResult::Ongoing
     }
 
-    /// Remet à zéro pour une nouvelle partie.
+    /// Resets for a new game.
     pub fn reset(&mut self) {
         self.board = Board::start_position();
         self.position_history.clear();

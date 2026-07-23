@@ -1,85 +1,85 @@
 // =============================================================================
 // Vendetta Chess Motor — src/board/magic.rs
 //
-// Rôle : Magic Bitboards pour le calcul ultra-rapide des attaques des pièces
-//        glissantes (tour et fou). Remplace les boucles de bitboard.rs par une
-//        simple consultation de table en temps constant.
+// Role: Magic Bitboards for ultra-fast computation of sliding piece attacks
+//        (rook and bishop). Replaces the loops in bitboard.rs with a
+//        simple constant-time table lookup.
 //
-// Principe :
-//   Pour une pièce sur la case `sq` avec l'occupancy `occ` :
-//     1. Masquer l'occupancy pertinente : occ & mask[sq]
-//     2. Multiplier par le nombre magique : masked × magic[sq]
-//     3. Décaler à droite : >> shift[sq]
-//     4. Consulter la table  : table[sq × TAILLE + index]
+// Principle:
+//   For a piece on square `sq` with occupancy `occ`:
+//     1. Mask the relevant occupancy: occ & mask[sq]
+//     2. Multiply by the magic number: masked × magic[sq]
+//     3. Shift right: >> shift[sq]
+//     4. Look up the table: table[sq × SIZE + index]
 //
-//   Cette formule, en une seule multiplication, compresse les bits pertinents
-//   de l'occupancy vers les bits de poids fort, produisant un index compact.
+//   This formula, in a single multiplication, compresses the relevant bits
+//   of the occupancy toward the high-order bits, producing a compact index.
 //
-// Nombres magiques :
-//   Trouvés au démarrage par essai aléatoire (xorshift64 épars).
-//   Convergence garantie : un bon magique existe pour chaque case.
-//   Durée typique : < 10 ms pour les 128 cases (64 tours + 64 fous).
+// Magic numbers:
+//   Found at startup by random trial (sparse xorshift64).
+//   Convergence guaranteed: a good magic number exists for every square.
+//   Typical duration: < 10 ms for the 128 squares (64 rooks + 64 bishops).
 //
-// Stockage (tables plates, offset = sq × TAILLE_MAX) :
-//   Tours  : 64 × 4096 × 8 octets = 2 Mo  (max 12 bits de masque → 2^12 = 4096)
-//   Fous   : 64 × 512  × 8 octets = 256 Ko (max  9 bits de masque → 2^9  =  512)
-//   Total  : ~2,25 Mo alloués sur le tas, accessibles en lecture seule ensuite.
+// Storage (flat tables, offset = sq × MAX_SIZE):
+//   Rooks  : 64 × 4096 × 8 bytes = 2 MB  (max 12 mask bits → 2^12 = 4096)
+//   Bishops: 64 × 512  × 8 bytes = 256 KB (max  9 mask bits → 2^9  =  512)
+//   Total  : ~2.25 MB allocated on the heap, read-only afterward.
 //
-// Thread-safety :
-//   OnceLock garantit que l'initialisation n'est exécutée qu'une seule fois,
-//   même si plusieurs threads appellent init_magic_tables() simultanément.
+// Thread-safety:
+//   OnceLock guarantees that initialization runs only once,
+//   even if several threads call init_magic_tables() simultaneously.
 // =============================================================================
 
 use std::sync::OnceLock;
 
 // =============================================================================
-// Structure de données
+// Data structure
 // =============================================================================
 
 struct MagicTables {
-    /// Masque d'occupancy pertinente pour chaque case (tour).
-    /// Les bords de l'échiquier sont exclus car ils ne changent pas la mobilité.
+    /// Relevant occupancy mask for each square (rook).
+    /// The edges of the board are excluded because they do not change mobility.
     rook_masks:    [u64; 64],
-    /// Masque d'occupancy pertinente pour chaque case (fou).
+    /// Relevant occupancy mask for each square (bishop).
     bishop_masks:  [u64; 64],
-    /// Nombre magique par case (tour).
+    /// Magic number per square (rook).
     rook_magics:   [u64; 64],
-    /// Nombre magique par case (fou).
+    /// Magic number per square (bishop).
     bishop_magics: [u64; 64],
-    /// Décalage = 64 − popcount(masque) par case (tour).
+    /// Shift = 64 − popcount(mask) per square (rook).
     rook_shifts:   [u32; 64],
-    /// Décalage = 64 − popcount(masque) par case (fou).
+    /// Shift = 64 − popcount(mask) per square (bishop).
     bishop_shifts: [u32; 64],
-    /// Tables plates des attaques de tours : index = sq × 4096 + magic_index.
+    /// Flat tables of rook attacks: index = sq × 4096 + magic_index.
     rook_table:    Vec<u64>,
-    /// Tables plates des attaques de fous  : index = sq × 512  + magic_index.
+    /// Flat tables of bishop attacks: index = sq × 512  + magic_index.
     bishop_table:  Vec<u64>,
 }
 
-/// Tables globales, initialisées une seule fois au démarrage.
+/// Global tables, initialized only once at startup.
 static MAGIC_TABLES: OnceLock<MagicTables> = OnceLock::new();
 
 // =============================================================================
-// Calcul des masques
+// Mask computation
 // =============================================================================
 
-/// Masque d'occupancy pour une tour sur `sq`.
+/// Occupancy mask for a rook on `sq`.
 ///
-/// Contient toutes les cases sur la même rangée et la même colonne,
-/// en excluant les cases de bord (elles ne bloquent pas la mobilité de la tour).
-/// La case `sq` elle-même est également exclue.
+/// Contains all squares on the same rank and the same file,
+/// excluding edge squares (they do not block the rook's mobility).
+/// The square `sq` itself is also excluded.
 fn rook_mask(sq: u8) -> u64 {
     let rank = (sq / 8) as i32;
     let file = (sq % 8) as i32;
     let mut mask = 0u64;
 
-    // Même rangée : colonnes b–g seulement (a et h exclues comme bords)
+    // Same rank: columns b–g only (a and h excluded as edges)
     for f in 1..7_i32 {
         if f != file {
             mask |= 1u64 << (rank * 8 + f);
         }
     }
-    // Même colonne : rangées 2–7 seulement (1 et 8 exclues comme bords)
+    // Same file: ranks 2–7 only (1 and 8 excluded as edges)
     for r in 1..7_i32 {
         if r != rank {
             mask |= 1u64 << (r * 8 + file);
@@ -88,15 +88,15 @@ fn rook_mask(sq: u8) -> u64 {
     mask
 }
 
-/// Masque d'occupancy pour un fou sur `sq`.
+/// Occupancy mask for a bishop on `sq`.
 ///
-/// Contient toutes les cases sur les 4 diagonales, en excluant les bords.
+/// Contains all squares on the 4 diagonals, excluding the edges.
 fn bishop_mask(sq: u8) -> u64 {
     let rank = (sq / 8) as i32;
     let file = (sq % 8) as i32;
     let mut mask = 0u64;
 
-    // 4 directions diagonales, en excluant strictement les bords (r ∈ ]0,7[, f ∈ ]0,7[)
+    // 4 diagonal directions, strictly excluding the edges (r ∈ ]0,7[, f ∈ ]0,7[)
     for (dr, df) in [(1_i32, 1_i32), (1, -1), (-1, 1), (-1, -1)] {
         let (mut r, mut f) = (rank + dr, file + df);
         while r > 0 && r < 7 && f > 0 && f < 7 {
@@ -109,11 +109,11 @@ fn bishop_mask(sq: u8) -> u64 {
 }
 
 // =============================================================================
-// Calcul lent des attaques (utilisé uniquement à l'initialisation)
+// Slow attack computation (used only during initialization)
 // =============================================================================
 
-/// Attaques d'une tour sur `sq` avec l'occupancy `occ` — version classique lente.
-/// Utilisé uniquement pour peupler les tables magiques au démarrage.
+/// Attacks of a rook on `sq` with occupancy `occ` — classic slow version.
+/// Used only to populate the magic tables at startup.
 fn slow_rook_attacks(sq: u8, occ: u64) -> u64 {
     let rank = (sq / 8) as i32;
     let file = (sq % 8) as i32;
@@ -132,8 +132,8 @@ fn slow_rook_attacks(sq: u8, occ: u64) -> u64 {
     attacks
 }
 
-/// Attaques d'un fou sur `sq` avec l'occupancy `occ` — version classique lente.
-/// Utilisé uniquement pour peupler les tables magiques au démarrage.
+/// Attacks of a bishop on `sq` with occupancy `occ` — classic slow version.
+/// Used only to populate the magic tables at startup.
 fn slow_bishop_attacks(sq: u8, occ: u64) -> u64 {
     let rank = (sq / 8) as i32;
     let file = (sq % 8) as i32;
@@ -153,11 +153,11 @@ fn slow_bishop_attacks(sq: u8, occ: u64) -> u64 {
 }
 
 // =============================================================================
-// Recherche des nombres magiques
+// Magic number search
 // =============================================================================
 
-/// Générateur de nombres pseudo-aléatoires xorshift64.
-/// Rapide, suffisant pour la recherche de magiques.
+/// xorshift64 pseudo-random number generator.
+/// Fast, sufficient for magic number search.
 #[inline]
 fn xorshift64(state: &mut u64) -> u64 {
     *state ^= *state << 13;
@@ -166,31 +166,31 @@ fn xorshift64(state: &mut u64) -> u64 {
     *state
 }
 
-/// Génère un nombre aléatoire épars (peu de bits à 1).
-/// Les bons nombres magiques tendent à être épars — cette heuristique
-/// accélère la convergence d'un facteur 5 à 10 en moyenne.
+/// Generates a sparse random number (few bits set to 1).
+/// Good magic numbers tend to be sparse — this heuristic
+/// speeds up convergence by a factor of 5 to 10 on average.
 #[inline]
 fn sparse_random(state: &mut u64) -> u64 {
     xorshift64(state) & xorshift64(state) & xorshift64(state)
 }
 
-/// Trouve un nombre magique valide pour la case `sq`.
+/// Finds a valid magic number for square `sq`.
 ///
-/// Algorithme :
-///   1. Énumérer tous les 2^N sous-ensembles du masque (carry-rippler).
-///   2. Pour chaque candidat magique, vérifier l'absence de collision :
-///      deux occupancies différentes doivent produire des indices différents
-///      (ou le même indice si leurs attaques sont identiques — constructive).
-///   3. Recommencer avec un nouveau candidat jusqu'à trouver un magique valide.
+/// Algorithm:
+///   1. Enumerate all 2^N subsets of the mask (carry-rippler).
+///   2. For each magic candidate, check for the absence of collisions:
+///      two different occupancies must produce different indices
+///      (or the same index if their attacks are identical — constructive).
+///   3. Start over with a new candidate until a valid magic number is found.
 ///
-/// La graine est unique par case pour diversifier les espaces de recherche.
+/// The seed is unique per square to diversify the search spaces.
 fn find_magic(sq: u8, mask: u64, is_rook: bool) -> u64 {
     let bits  = mask.count_ones() as usize;
     let shift = (64 - bits) as u32;
     let n     = 1usize << bits;
 
-    // Pré-calculer tous les sous-ensembles du masque et leurs attaques correspondantes.
-    // La carry-rippler énumère les 2^bits sous-ensembles dans l'ordre décroissant.
+    // Precompute all subsets of the mask and their corresponding attacks.
+    // The carry-rippler enumerates the 2^bits subsets in descending order.
     let mut occs    = vec![0u64; n];
     let mut attacks = vec![0u64; n];
 
@@ -205,23 +205,23 @@ fn find_magic(sq: u8, mask: u64, is_rook: bool) -> u64 {
         };
         i += 1;
         if subset == 0 { break; }
-        subset = (subset - 1) & mask; // Prochain sous-ensemble (carry-rippler)
+        subset = (subset - 1) & mask; // Next subset (carry-rippler)
     }
 
-    // Table temporaire pour la vérification des collisions.
-    // Une entrée à 0 signifie "jamais visitée" (les attaques sont toujours > 0).
+    // Temporary table for collision checking.
+    // An entry of 0 means "never visited" (attacks are always > 0).
     let mut used = vec![0u64; n];
 
-    // Graine unique par case pour diversifier la recherche
+    // Unique seed per square to diversify the search
     let mut rng = 0xDEADBEEFCAFEBABEu64
         ^ ((sq as u64).wrapping_mul(0x9E3779B97F4A7C15));
 
-    // Compteur de sécurité : en théorie, un nombre magique valide existe toujours
-    // pour les cases d'un échiquier 8×8. En pratique, la convergence est < 10 ms
-    // pour les 128 cases (tours + fous). Si cette borne est atteinte, cela indique
-    // un bug dans la génération du masque (mask == 0, bits incorrects, etc.).
-    // Valeur choisie : 100 millions >> largement supérieure aux pires cas observés
-    // (~10 000 tentatives pour les cases difficiles), sans risque de faux positif.
+    // Safety counter: in theory, a valid magic number always exists
+    // for the squares of an 8×8 board. In practice, convergence is < 10 ms
+    // for the 128 squares (rooks + bishops). If this bound is reached, it indicates
+    // a bug in the mask generation (mask == 0, incorrect bits, etc.).
+    // Chosen value: 100 million >> far greater than the worst cases observed
+    // (~10,000 attempts for difficult squares), with no risk of a false positive.
     const MAX_MAGIC_ATTEMPTS: u64 = 100_000_000;
     let mut attempts: u64 = 0;
 
@@ -238,44 +238,44 @@ fn find_magic(sq: u8, mask: u64, is_rook: bool) -> u64 {
 
         let magic = sparse_random(&mut rng);
 
-        // Filtre rapide : un bon magique doit "disperser" les bits du masque.
-        // Heuristique classique : au moins 6 bits à 1 dans les 8 bits de poids fort
-        // du produit (mask × magic). Rejette ~80 % des mauvais candidats d'emblée.
+        // Quick filter: a good magic number must "disperse" the mask's bits.
+        // Classic heuristic: at least 6 bits set to 1 in the 8 high-order bits
+        // of the product (mask × magic). Rejects ~80% of bad candidates upfront.
         if (mask.wrapping_mul(magic) >> 56).count_ones() < 6 {
             continue;
         }
 
-        // Réinitialiser la table de vérification
+        // Reset the verification table
         used.fill(0);
 
-        // Vérifier l'absence de collision pour tous les sous-ensembles
+        // Check for the absence of collisions across all subsets
         for j in 0..n {
             let idx = ((occs[j].wrapping_mul(magic)) >> shift) as usize;
 
             if used[idx] == 0 {
-                // Première fois que cet index est utilisé : enregistrer l'attaque
+                // First time this index is used: record the attack
                 used[idx] = attacks[j];
             } else if used[idx] != attacks[j] {
-                // Collision destructive : deux attaques différentes sur le même index
+                // Destructive collision: two different attacks on the same index
                 continue 'outer;
             }
-            // Collision constructive (used[idx] == attacks[j]) : acceptable
+            // Constructive collision (used[idx] == attacks[j]): acceptable
         }
 
-        // Aucune collision destructive → magique valide trouvé
+        // No destructive collision → valid magic number found
         return magic;
     }
 }
 
 // =============================================================================
-// Initialisation (appelée une seule fois au démarrage)
+// Initialization (called only once at startup)
 // =============================================================================
 
-/// Initialise les tables magiques pour les 64 cases, tours et fous.
+/// Initializes the magic tables for the 64 squares, rooks and bishops.
 ///
-/// Cette fonction est appelée depuis `init_attack_tables()` dans bitboard.rs.
-/// Elle est idempotente et thread-safe (OnceLock).
-/// Durée typique : < 10 ms sur un CPU moderne.
+/// This function is called from `init_attack_tables()` in bitboard.rs.
+/// It is idempotent and thread-safe (OnceLock).
+/// Typical duration: < 10 ms on a modern CPU.
 pub fn init_magic_tables() {
     MAGIC_TABLES.get_or_init(|| {
         let mut rook_masks    = [0u64; 64];
@@ -285,14 +285,14 @@ pub fn init_magic_tables() {
         let mut rook_shifts   = [0u32; 64];
         let mut bishop_shifts = [0u32; 64];
 
-        // Tables plates allouées sur le tas pour éviter tout débordement de pile.
-        // Offset d'accès : sq × TAILLE_MAX + magic_index
-        let mut rook_table   = vec![0u64; 64 * 4096]; // 2 Mo
-        let mut bishop_table = vec![0u64; 64 * 512];  // 256 Ko
+        // Flat tables allocated on the heap to avoid any stack overflow.
+        // Access offset: sq × MAX_SIZE + magic_index
+        let mut rook_table   = vec![0u64; 64 * 4096]; // 2 MB
+        let mut bishop_table = vec![0u64; 64 * 512];  // 256 KB
 
         for sq in 0u8..64 {
             // ----------------------------------------------------------------
-            // Tour
+            // Rook
             // ----------------------------------------------------------------
             let r_mask  = rook_mask(sq);
             let r_magic = find_magic(sq, r_mask, true);
@@ -302,8 +302,8 @@ pub fn init_magic_tables() {
             rook_magics[sq as usize] = r_magic;
             rook_shifts[sq as usize] = r_shift;
 
-            // Peupler la table : pour chaque sous-ensemble de r_mask, calculer
-            // l'index magique et stocker les attaques correspondantes.
+            // Populate the table: for each subset of r_mask, compute
+            // the magic index and store the corresponding attacks.
             let base = sq as usize * 4096;
             let mut subset = r_mask;
             loop {
@@ -314,7 +314,7 @@ pub fn init_magic_tables() {
             }
 
             // ----------------------------------------------------------------
-            // Fou
+            // Bishop
             // ----------------------------------------------------------------
             let b_mask  = bishop_mask(sq);
             let b_magic = find_magic(sq, b_mask, false);
@@ -348,12 +348,12 @@ pub fn init_magic_tables() {
 }
 
 // =============================================================================
-// Fonctions d'attaque publiques
+// Public attack functions
 // =============================================================================
 
-/// Retourne les cases attaquées par une tour sur `sq` avec l'occupancy `occ`.
+/// Returns the squares attacked by a rook on `sq` with occupancy `occ`.
 ///
-/// Version Magic Bitboards : O(1) — une multiplication, un décalage, un lookup.
+/// Magic Bitboards version: O(1) — one multiplication, one shift, one lookup.
 #[inline]
 pub fn rook_attacks_magic(sq: u8, occ: u64) -> u64 {
     let t     = MAGIC_TABLES.get()
@@ -365,9 +365,9 @@ pub fn rook_attacks_magic(sq: u8, occ: u64) -> u64 {
     t.rook_table[sq as usize * 4096 + idx]
 }
 
-/// Retourne les cases attaquées par un fou sur `sq` avec l'occupancy `occ`.
+/// Returns the squares attacked by a bishop on `sq` with occupancy `occ`.
 ///
-/// Version Magic Bitboards : O(1) — une multiplication, un décalage, un lookup.
+/// Magic Bitboards version: O(1) — one multiplication, one shift, one lookup.
 #[inline]
 pub fn bishop_attacks_magic(sq: u8, occ: u64) -> u64 {
     let t     = MAGIC_TABLES.get()

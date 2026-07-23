@@ -1,40 +1,40 @@
 // =============================================================================
 // Vendetta Chess Motor — src/eval/mobility.rs
 //
-// Rôle : Évaluation de la mobilité des pièces ET du contrôle du centre par
-//        les pièces (cavalier, fou, tour, dame) — les deux critères sont
-//        calculés en une seule passe par pièce, voir note d'optimisation
-//        ci-dessous.
+// Role: Evaluation of piece mobility AND center control by
+//        the pieces (knight, bishop, rook, queen) — both criteria are
+//        calculated in a single pass per piece, see optimization note
+//        below.
 //
-// Méthode :
-//   Pour chaque pièce (cavalier, fou, tour, dame), on compte le nombre de
-//   cases qu'elle peut atteindre sans être bloquée par ses propres pièces.
-//   Les pions et le roi sont exclus : leur mobilité est gérée ailleurs
-//   (structure de pions, sécurité du roi).
+// Method:
+//   For each piece (knight, bishop, rook, queen), we count the number of
+//   squares it can reach without being blocked by its own pieces.
+//   Pawns and the king are excluded: their mobility is handled elsewhere
+//   (pawn structure, king safety).
 //
-// Bonus de mobilité par case accessible (en centipions) :
-//   - Cavalier : 4  (très sensible à sa mobilité, un cavalier en coin est faible)
-//   - Fou      : 3  (sa force dépend de ses diagonales ouvertes)
-//   - Tour     : 2  (besoin de colonnes ouvertes)
-//   - Dame     : 1  (déjà très mobile, peu de bonus marginal)
+// Mobility bonus per accessible square (in centipawns):
+//   - Knight : 4  (very sensitive to its mobility, a knight in the corner is weak)
+//   - Bishop  : 3  (its strength depends on its open diagonals)
+//   - Rook    : 2  (needs open files)
+//   - Queen   : 1  (already very mobile, little marginal bonus)
 //
-// Optimisation — fusion avec le contrôle du centre (eval/center.rs) :
-//   Avant : mobility.rs ET center.rs calculaient CHACUN, indépendamment,
-//   le bitboard d'attaque de chaque cavalier/fou/tour/dame (knight_attacks,
-//   bishop_attacks, rook_attacks, queen_attacks — ce dernier coûteux car il
-//   combine deux lookups magic bitboard). Résultat : le même calcul fait
-//   deux fois par pièce et par nœud d'évaluation.
-//   Après : le bitboard d'attaque brut de chaque pièce est calculé UNE SEULE
-//   FOIS ici, puis réutilisé pour les DEUX bonus :
-//     - mobilité : attaques ET cases occupées par une pièce amie (!own_pieces)
-//     - centre   : attaques ET les 4 cases centrales (CENTER_SQUARES),
-//                  SANS exclure les cases amies — comportement identique à
-//                  l'ancien center.rs (défendre le centre compte autant que
-//                  l'attaquer).
-//   Le résultat numérique de chaque bonus est rigoureusement inchangé par
-//   rapport aux deux fonctions séparées — seul le nombre de calculs d'attaque
-//   diminue de moitié. Les pions ne sont pas concernés (gérés uniquement par
-//   center::center_pawn_eval(), aucune mobilité de pion évaluée ici).
+// Optimization — merge with center control (eval/center.rs):
+//   Before: mobility.rs AND center.rs EACH independently calculated,
+//   the attack bitboard of each knight/bishop/rook/queen (knight_attacks,
+//   bishop_attacks, rook_attacks, queen_attacks — the latter costly because it
+//   combines two magic bitboard lookups). Result: the same calculation done
+//   twice per piece and per evaluation node.
+//   After: the raw attack bitboard of each piece is calculated ONLY ONCE
+//   here, then reused for BOTH bonuses:
+//     - mobility: attacks AND squares occupied by a friendly piece (!own_pieces)
+//     - center  : attacks AND the 4 central squares (CENTER_SQUARES),
+//                  WITHOUT excluding friendly squares — behavior identical to
+//                  the old center.rs (defending the center counts as much as
+//                  attacking it).
+//   The numerical result of each bonus is rigorously unchanged
+//   compared to the two separate functions — only the number of attack calculations
+//   is halved. Pawns are not affected (handled solely by
+//   center::center_pawn_eval(), no pawn mobility evaluated here).
 // =============================================================================
 
 use crate::utils::types::{Color, Piece};
@@ -47,19 +47,19 @@ use super::king_safety::{
     KING_ATTACK_WEIGHT_ROOK, KING_ATTACK_WEIGHT_QUEEN,
 };
 
-/// Résultat de la passe par pièce pour une couleur : mobilité, contrôle du
-/// centre, et pression sur le roi adverse (unités d'attaque + nb d'attaquants).
+/// Result of the per-piece pass for a color: mobility, center
+/// control, and pressure on the opponent's king (attack units + number of attackers).
 pub struct PieceActivity {
     pub mobility:        i32,
     pub center:          i32,
-    pub king_units:      i32, // somme pondérée des cases de la zone du roi adverse attaquées
-    pub king_attackers:  i32, // nombre de pièces distinctes touchant cette zone
+    pub king_units:      i32, // weighted sum of attacked squares in the opponent king's zone
+    pub king_attackers:  i32, // number of distinct pieces touching this zone
 }
 
-/// Construit le bitboard de la "zone du roi" du camp `defender` : cases
-/// adjacentes au roi (+ sa case), étendues d'un rang vers l'avant (côté d'où
-/// l'ennemi attaque). Les décalages verticaux écartent naturellement les bits
-/// hors échiquier ; aucun débordement est-ouest possible.
+/// Builds the bitboard of the "king zone" of the `defender` side: squares
+/// adjacent to the king (+ its square), extended one rank forward (the side from which
+/// the enemy attacks). The vertical shifts naturally discard bits
+/// off the board; no east-west overflow is possible.
 #[inline]
 fn king_zone(board: &Board, defender: Color) -> u64 {
     let ksq = board.king_square(defender);
@@ -67,31 +67,31 @@ fn king_zone(board: &Board, defender: Color) -> u64 {
     adj | if defender == Color::White { adj << 8 } else { adj >> 8 }
 }
 
-/// Pression d'une pièce sur la zone du roi adverse, à partir de son bitboard
-/// d'attaque DÉJÀ calculé pour la mobilité. Retourne (attaquant ? 1 : 0,
-/// unités d'attaque) — un AND + un popcount, quasi gratuit.
+/// Pressure of a piece on the opponent king's zone, from its bitboard
+/// of attacks ALREADY calculated for mobility. Returns (attacker ? 1 : 0,
+/// attack units) — an AND + a popcount, almost free.
 #[inline]
 fn king_pressure(attacks: u64, enemy_zone: u64, weight: i32) -> (i32, i32) {
     let hits = (attacks & enemy_zone).count_ones() as i32;
     if hits > 0 { (1, hits * weight) } else { (0, 0) }
 }
 
-/// Bonus de mobilité par case accessible, selon le type de pièce.
-/// Calibrés par Texel Tuning v3 (étaient 4, 3, 2, 1) — voir
-/// material.rs::PIECE_VALUE pour le contexte complet du tuning.
+/// Mobility bonus per accessible square, depending on piece type.
+/// Calibrated by Texel Tuning v3 (were 4, 3, 2, 1) — see
+/// material.rs::PIECE_VALUE for the full tuning context.
 const KNIGHT_MOBILITY_BONUS: i32 = 11;
 const BISHOP_MOBILITY_BONUS: i32 = 10;
 const ROOK_MOBILITY_BONUS:   i32 = 10;
 const QUEEN_MOBILITY_BONUS:  i32 = 5;
 
-/// Calcule, pour une couleur et en UNE passe sur les pièces, la mobilité, le
-/// contrôle du centre, et la pression sur le roi adverse (voir PieceActivity) —
-/// tout à partir du même bitboard d'attaque par pièce.
+/// Calculates, for a color and in ONE pass over the pieces, the mobility, the
+/// center control, and the pressure on the opponent's king (see PieceActivity) —
+/// all from the same per-piece attack bitboard.
 ///
-/// `include_center` : si false, le bonus de centre n'est ni accumulé ni calculé
-/// (finale — reproduit l'ancien comportement, voir eval/mod.rs).
-/// `king_attack` : si false, la pression sur le roi n'est ni accumulée ni
-/// calculée (finale, ou terme désactivé pour un test SPRT) → zéro travail.
+/// `include_center`: if false, the center bonus is neither accumulated nor calculated
+/// (endgame — reproduces the old behavior, see eval/mod.rs).
+/// `king_attack`: if false, the pressure on the king is neither accumulated nor
+/// calculated (endgame, or term disabled for an SPRT test) → zero work.
 pub fn mobility_and_center_score(
     board: &Board,
     color: Color,
@@ -105,12 +105,12 @@ pub fn mobility_and_center_score(
     let mut king_units     = 0i32;
     let mut king_attackers = 0i32;
 
-    // Zone du roi ADVERSE (ce que `color` menace). Calculée seulement si le terme
-    // king-attack est actif (hors finale / non désactivé) — sinon zéro travail.
+    // Zone of the OPPONENT's king (what `color` threatens). Calculated only if the
+    // king-attack term is active (not endgame / not disabled) — otherwise zero work.
     let enemy_zone = if king_attack { king_zone(board, color.opposite()) } else { 0 };
 
-    // --- Cavaliers ---
-    // Un cavalier coincé dans un coin perd beaucoup de puissance.
+    // --- Knights ---
+    // A knight stuck in a corner loses a lot of power.
     let mut knights = board.pieces[color.index()][Piece::Knight.index()];
     while knights != 0 {
         let sq      = knights.trailing_zeros() as u8;
@@ -126,8 +126,8 @@ pub fn mobility_and_center_score(
         }
     }
 
-    // --- Fous ---
-    // Les diagonales ouvertes sont la force du fou.
+    // --- Bishops ---
+    // Open diagonals are the bishop's strength.
     let mut bishops = board.pieces[color.index()][Piece::Bishop.index()];
     while bishops != 0 {
         let sq      = bishops.trailing_zeros() as u8;
@@ -143,8 +143,8 @@ pub fn mobility_and_center_score(
         }
     }
 
-    // --- Tours ---
-    // Les tours ont besoin de colonnes et de rangs ouverts pour être actives.
+    // --- Rooks ---
+    // Rooks need open files and ranks to be active.
     let mut rooks = board.pieces[color.index()][Piece::Rook.index()];
     while rooks != 0 {
         let sq      = rooks.trailing_zeros() as u8;
@@ -160,8 +160,8 @@ pub fn mobility_and_center_score(
         }
     }
 
-    // --- Dames ---
-    // La dame est déjà puissante : faible bonus marginal par case supplémentaire.
+    // --- Queens ---
+    // The queen is already powerful: small marginal bonus per additional square.
     let mut queens = board.pieces[color.index()][Piece::Queen.index()];
     while queens != 0 {
         let sq      = queens.trailing_zeros() as u8;
@@ -180,19 +180,19 @@ pub fn mobility_and_center_score(
     PieceActivity { mobility, center, king_units, king_attackers }
 }
 
-/// Calcule les différentiels de mobilité et de centre (pièces) du point de
-/// vue du joueur actif. Score positif = avantage pour le joueur actif.
+/// Calculates the mobility and center (pieces) differentials from the
+/// point of view of the active player. Positive score = advantage for the active player.
 ///
-/// Remplace les anciens appels séparés à mobility_eval() et à la partie
-/// "pièces" de center_eval() — voir eval/mod.rs pour l'assemblage avec
-/// center::center_pawn_eval() (pions, non concernés par cette fusion).
+/// Replaces the old separate calls to mobility_eval() and to the "pieces"
+/// part of center_eval() — see eval/mod.rs for the assembly with
+/// center::center_pawn_eval() (pawns, not affected by this merge).
 pub fn mobility_and_center_eval(
     board: &Board,
     is_endgame: bool,
     king_attack: bool,
 ) -> (i32, i32, i32) {
-    // include_center et king-attack sont tous deux inactifs en finale (le
-    // contrôle du centre et la sécurité du roi n'y sont plus pertinents).
+    // include_center and king-attack are both inactive in the endgame (the
+    // center control and king safety are no longer relevant there).
     let include_center = !is_endgame;
     let do_king_attack = king_attack && !is_endgame;
 
@@ -202,8 +202,8 @@ pub fn mobility_and_center_eval(
     let mobility_diff = white.mobility - black.mobility;
     let center_diff   = white.center   - black.center;
 
-    // Danger king-attack : la pression des Blancs vise le roi NOIR (bonus Blanc),
-    // et inversement. Différentiel en perspective Blanc.
+    // king-attack danger: White's pressure targets the BLACK king (White bonus),
+    // and vice versa. Differential in White's perspective.
     let white_danger_to_black = king_attack_danger(white.king_units, white.king_attackers);
     let black_danger_to_white = king_attack_danger(black.king_units, black.king_attackers);
     let king_attack_diff = white_danger_to_black - black_danger_to_white;

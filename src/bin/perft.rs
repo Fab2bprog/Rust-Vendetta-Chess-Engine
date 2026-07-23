@@ -1,38 +1,38 @@
 // =============================================================================
 // Vendetta Chess Motor — src/bin/perft.rs
 //
-// Rôle : Outil de validation de la génération de coups par la méthode Perft.
+// Role: Move generation validation tool using the Perft method.
 //
-// Principe :
-//   Perft (PERFormance Test) compte le nombre exact de positions atteignables
-//   depuis une position donnée à une profondeur N. Ces résultats sont connus
-//   avec précision et servent de référence absolue pour valider qu'un moteur
-//   ne génère ni coup illégal ni coup manquant.
+// Principle:
+//   Perft (PERFormance Test) counts the exact number of reachable positions
+//   from a given position at depth N. These results are known
+//   with precision and serve as an absolute reference to validate that an engine
+//   generates neither illegal moves nor missing moves.
 //
-//   Si perft(pos, depth) retourne 197 281 au lieu de 197 281 → le moteur est
-//   correct à cette profondeur. Un écart, même de 1, indique un bug précis
-//   dans la génération : clouage non détecté, roque illégal accepté, prise en
-//   passant manquée, promotion mal gérée, etc.
+//   If perft(pos, depth) returns 197 281 instead of 197 281 → the engine is
+//   correct at this depth. A discrepancy, even of 1, indicates a precise bug
+//   in the generation: undetected pin, illegal castling accepted, en
+//   passant missed, mishandled promotion, etc.
 //
-// Utilisation :
-//   # Lancer toutes les positions de référence
+// Usage:
+//   # Run all reference positions
 //   cargo run --release --bin perft
 //
-//   # Lancer une position spécifique jusqu'à une profondeur donnée
+//   # Run a specific position up to a given depth
 //   cargo run --release --bin perft -- "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" 5
 //
-//   # Mode divide : afficher le compte par coup racine (utile pour isoler un bug)
+//   # Divide mode: display the count per root move (useful for isolating a bug)
 //   cargo run --release --bin perft -- divide "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1" 3
 //
-// Positions de référence :
-//   Les 6 positions standard de la Chess Programming Wiki, couvrant
-//   tous les cas spéciaux : roques, prises en passant, promotions,
-//   découvertes d'échec, positions de fin de partie.
+// Reference positions:
+//   The 6 standard positions from the Chess Programming Wiki, covering
+//   all special cases: castling, en passant captures, promotions,
+//   discovered checks, endgame positions.
 //
-// Interprétation de la sortie :
-//   ✓ PASS  → génération correcte à cette profondeur
-//   ✗ FAIL  → bug détecté ; utiliser le mode divide pour le localiser
-//   ?       → aucune valeur de référence connue pour cette profondeur
+// Output interpretation:
+//   ✓ PASS  → correct generation at this depth
+//   ✗ FAIL  → bug detected; use divide mode to locate it
+//   ?       → no known reference value for this depth
 // =============================================================================
 
 use std::time::Instant;
@@ -40,30 +40,30 @@ use vendetta_chess_motor::board::state::Board;
 use vendetta_chess_motor::moves::{perft, perft_divide};
 
 // =============================================================================
-// Positions de référence
+// Reference positions
 // =============================================================================
 
-/// Une position de test perft avec ses résultats attendus par profondeur.
+/// A perft test position with its expected results per depth.
 struct PerftPosition {
-    /// Nom descriptif de la position (pour l'affichage).
+    /// Descriptive name of the position (for display).
     name:     &'static str,
-    /// FEN de la position.
+    /// FEN of the position.
     fen:      &'static str,
-    /// Résultats attendus : expected[i] = nombre de nœuds à profondeur i+1.
-    /// None = résultat non renseigné pour cette profondeur.
+    /// Expected results: expected[i] = number of nodes at depth i+1.
+    /// None = result not provided for this depth.
     expected: &'static [Option<u64>],
 }
 
-/// Les 6 positions de référence standard de la Chess Programming Wiki.
-/// Source : https://www.chessprogramming.org/Perft_Results
+/// The 6 standard reference positions from the Chess Programming Wiki.
+/// Source: https://www.chessprogramming.org/Perft_Results
 ///
-/// Couverture des cas spéciaux :
-///   Pos 1 — Position initiale          : cas de base
-///   Pos 2 — Kiwipete                   : roques des deux côtés, promotions, en passant
-///   Pos 3 — Finale avec pions passés    : promotions, règle des 50 coups
-///   Pos 4 — Promotions intensives       : promotions + roques avec droits limités
-///   Pos 5 — En passant et promotions    : prises en passant edge-cases
-///   Pos 6 — Milieu de partie équilibré  : coups silencieux et captures mélangés
+/// Coverage of special cases:
+///   Pos 1 — Initial position          : base case
+///   Pos 2 — Kiwipete                   : castling on both sides, promotions, en passant
+///   Pos 3 — Endgame with passed pawns    : promotions, 50-move rule
+///   Pos 4 — Intensive promotions       : promotions + castling with limited rights
+///   Pos 5 — En passant and promotions    : en passant edge cases
+///   Pos 6 — Balanced middlegame  : quiet moves and captures mixed
 static POSITIONS: &[PerftPosition] = &[
     PerftPosition {
         name: "Position 1 — Initiale",
@@ -141,11 +141,11 @@ static POSITIONS: &[PerftPosition] = &[
 ];
 
 // =============================================================================
-// Exécution d'une suite perft
+// Running a perft suite
 // =============================================================================
 
-/// Lance toutes les profondeurs définies pour une position et affiche les résultats.
-/// Retourne true si tous les résultats sont corrects (ou non vérifiables).
+/// Runs all defined depths for a position and displays the results.
+/// Returns true if all results are correct (or unverifiable).
 fn run_position(pos: &PerftPosition, max_depth: Option<u32>) -> bool {
     let mut board = match Board::from_fen(pos.fen) {
         Ok(b)  => b,
@@ -192,11 +192,11 @@ fn run_position(pos: &PerftPosition, max_depth: Option<u32>) -> bool {
 }
 
 // =============================================================================
-// Utilitaires d'affichage
+// Display utilities
 // =============================================================================
 
-/// Formate un entier avec des espaces comme séparateurs de milliers.
-/// Ex : 4865609 → "4 865 609"
+/// Formats an integer with spaces as thousands separators.
+/// E.g.: 4865609 → "4 865 609"
 fn fmt_num(n: u64) -> String {
     let s   = n.to_string();
     let len = s.len();
@@ -210,22 +210,22 @@ fn fmt_num(n: u64) -> String {
     out
 }
 
-/// Affiche une ligne séparatrice.
+/// Displays a separator line.
 fn separator() {
     println!("{}", "─".repeat(72));
 }
 
 // =============================================================================
-// Point d'entrée
+// Entry point
 // =============================================================================
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    // --- Mode divide : perft divide <fen> <depth> ---
-    // Affiche le nombre de nœuds pour chaque coup racine.
-    // Indispensable pour isoler un bug : on compare coup par coup avec
-    // un moteur de référence (Stockfish) jusqu'à trouver la divergence.
+    // --- Divide mode: perft divide <fen> <depth> ---
+    // Displays the number of nodes for each root move.
+    // Essential for isolating a bug: compare move by move with
+    // a reference engine (Stockfish) until the divergence is found.
     if args.len() >= 4 && args[1] == "divide" {
         let fen   = &args[2];
         let depth = args[3].parse::<u32>().unwrap_or(1);
@@ -251,9 +251,9 @@ fn main() {
         return;
     }
 
-    // --- Mode position unique : perft <fen> <depth> ---
-    // On n'utilise pas PerftPosition ici car son champ `fen` est &'static str
-    // et args[1] est une variable locale — on inline la logique directement.
+    // --- Single position mode: perft <fen> <depth> ---
+    // We don't use PerftPosition here because its `fen` field is &'static str
+    // and args[1] is a local variable — we inline the logic directly.
     if args.len() >= 3 && args[1] != "divide" {
         let fen       = args[1].clone();
         let max_depth = args[2].parse::<u32>().unwrap_or(5);
@@ -280,7 +280,7 @@ fn main() {
         return;
     }
 
-    // --- Mode suite complète (défaut) ---
+    // --- Full suite mode (default) ---
     println!();
     println!("╔══════════════════════════════════════════════════════════════════════╗");
     println!("║         Vendetta Chess Motor — Suite de validation Perft                   ║");
@@ -290,16 +290,16 @@ fn main() {
     println!("  Légende : ✓ PASS  ✗ FAIL  ? (pas de référence à cette profondeur)");
     println!();
 
-    // Profondeurs par défaut pour la suite (équilibre vitesse/couverture).
-    // En mode release, la suite complète tourne en < 30 secondes.
-    // Augmenter les profondeurs pour une validation exhaustive.
+    // Default depths for the suite (speed/coverage balance).
+    // In release mode, the full suite runs in < 30 seconds.
+    // Increase the depths for exhaustive validation.
     let max_depths: &[u32] = &[
-        5, // Pos 1 : 4 865 609 nœuds (~2 s en release)
-        4, // Pos 2 : 4 085 603 nœuds (~2 s en release)
-        5, // Pos 3 :   674 624 nœuds (<1 s en release)
-        4, // Pos 4 :   422 333 nœuds (<1 s en release)
-        4, // Pos 5 : 2 103 487 nœuds (~1 s en release)
-        4, // Pos 6 : 3 894 594 nœuds (~2 s en release)
+        5, // Pos 1: 4 865 609 nodes (~2 s in release)
+        4, // Pos 2: 4 085 603 nodes (~2 s in release)
+        5, // Pos 3:   674 624 nodes (<1 s in release)
+        4, // Pos 4:   422 333 nodes (<1 s in release)
+        4, // Pos 5: 2 103 487 nodes (~1 s in release)
+        4, // Pos 6: 3 894 594 nodes (~2 s in release)
     ];
 
     let mut total_pass = 0usize;
@@ -335,7 +335,7 @@ fn main() {
     }
     println!();
 
-    // Quitter avec code d'erreur si des tests échouent (utile pour CI).
+    // Exit with an error code if tests fail (useful for CI).
     if total_fail > 0 {
         std::process::exit(1);
     }

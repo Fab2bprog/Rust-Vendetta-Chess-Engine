@@ -1,95 +1,95 @@
 // =============================================================================
 // Vendetta Chess Motor — src/search/transposition.rs
 //
-// Rôle : Table de transposition (TT) thread-safe et lock-free.
-//        Cache des positions déjà analysées. Partagée entre tous les threads
+// Role: Thread-safe, lock-free transposition table (TT).
+//        Cache of already-analyzed positions. Shared across all threads
 //        Lazy SMP via Arc<TranspositionTable>.
 //
-// Architecture multi-thread :
-//   Chaque entrée est stockée sous forme de deux AtomicU64 :
-//     - key  : hash Zobrist de la position
-//     - data : données compressées (score, profondeur, flag, coup)
+// Multi-thread architecture:
+//   Each entry is stored as two AtomicU64:
+//     - key  : Zobrist hash of the position
+//     - data : compressed data (score, depth, flag, move)
 //
-//   Les lectures/écritures utilisent Ordering::Relaxed pour la performance.
-//   Les "races" bénignes (lecture d'une entrée en cours d'écriture par un
-//   autre thread) se traduisent par un simple cache-miss — jamais par une
-//   erreur de logique.
+//   Reads/writes use Ordering::Relaxed for performance.
+//   Benign "races" (reading an entry currently being written by
+//   another thread) simply result in a cache-miss — never a logic
+//   error.
 //
-// Encodage du champ `data` (64 bits) :
-//   bits  0-20 : score + 1_000_000 (21 bits, valeurs [0, 2_000_000])
-//   bits 21-27 : profondeur (7 bits, valeurs [0, 127])
-//   bits 28-29 : TTFlag (2 bits : 0=Exact, 1=LowerBound, 2=UpperBound)
-//   bits 30-35 : case départ du coup (6 bits)
-//   bits 36-41 : case arrivée du coup (6 bits)
-//   bits 42-44 : MoveFlags enum (3 bits, valeurs 0-7)
-//   bits 45-47 : pièce de promotion (3 bits, valeurs 0-7)
-//   bits 48-63 : inutilisés
+// Encoding of the `data` field (64 bits):
+//   bits  0-20 : score + 1_000_000 (21 bits, values [0, 2_000_000])
+//   bits 21-27 : depth (7 bits, values [0, 127])
+//   bits 28-29 : TTFlag (2 bits: 0=Exact, 1=LowerBound, 2=UpperBound)
+//   bits 30-35 : move's from square (6 bits)
+//   bits 36-41 : move's to square (6 bits)
+//   bits 42-44 : MoveFlags enum (3 bits, values 0-7)
+//   bits 45-47 : promotion piece (3 bits, values 0-7)
+//   bits 48-63 : unused
 //
-// Politique de remplacement avec numéro de génération (par commande "go") :
-//   - Entrée périmée (génération différente) → toujours remplacée.
-//   - Même génération → remplacée si profondeur >= ancienne.
-// La génération est encodée dans les bits 48-55 du champ data (8 bits, 256 valeurs).
+// Replacement policy with generation number (per "go" command):
+//   - Stale entry (different generation) → always replaced.
+//   - Same generation → replaced if depth >= old depth.
+// The generation is encoded in bits 48-55 of the data field (8 bits, 256 values).
 // =============================================================================
 
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use crate::utils::types::{Move, MoveFlags};
 
-/// Type d'entrée dans la table de transposition.
+/// Entry type in the transposition table.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TTFlag {
-    /// Score exact (fenêtre alpha-bêta complète traversée).
+    /// Exact score (full alpha-beta window traversed).
     Exact      = 0,
-    /// Borne inférieure (fail high — score >= beta).
+    /// Lower bound (fail high — score >= beta).
     LowerBound = 1,
-    /// Borne supérieure (fail low — score <= alpha).
+    /// Upper bound (fail low — score <= alpha).
     UpperBound = 2,
 }
 
-/// Une entrée décodée de la table de transposition.
-/// Utilisée uniquement comme valeur de retour — pas stockée directement.
+/// An entry decoded from the transposition table.
+/// Used only as a return value — not stored directly.
 #[derive(Clone, Copy, Debug)]
 pub struct TTEntry {
-    /// Hash Zobrist de la position (pour détecter les collisions).
+    /// Zobrist hash of the position (to detect collisions).
     pub hash:      u64,
-    /// Score de la position.
+    /// Score of the position.
     pub score:     i32,
-    /// Profondeur à laquelle ce score a été calculé.
+    /// Depth at which this score was computed.
     pub depth:     i32,
-    /// Type du score (exact, borne inférieure ou supérieure).
+    /// Type of the score (exact, lower bound, or upper bound).
     pub flag:      TTFlag,
-    /// Meilleur coup trouvé pour cette position (pour l'ordonnancement).
+    /// Best move found for this position (for move ordering).
     pub best_move: Move,
 }
 
 // =============================================================================
-// Slot atomique (paire key/data)
+// Atomic slot (key/data pair)
 // =============================================================================
 
-/// Un slot atomique dans la table de transposition.
-/// key et data sont chacun un AtomicU64 pour les accès lock-free.
+/// An atomic slot in the transposition table.
+/// key and data are each an AtomicU64 for lock-free access.
 struct TtSlot {
-    /// Hash Zobrist — sert à vérifier qu'on lit la bonne position.
+    /// Zobrist hash — used to verify we're reading the right position.
     key:  AtomicU64,
-    /// Données compressées (voir encodage dans l'en-tête du fichier).
+    /// Compressed data (see encoding in the file header).
     data: AtomicU64,
 }
 
 // =============================================================================
-// Fonctions d'encodage / décodage
+// Encoding / decoding functions
 // =============================================================================
 
-/// Compresse score, profondeur, flag, coup ET génération dans un u64.
+/// Compresses score, depth, flag, move AND generation into a u64.
 ///
-/// Encodage (64 bits) :
+/// Encoding (64 bits):
 ///   bits  0-20 : score + 1_000_000 (21 bits, [0, 2_000_000])
-///   bits 21-27 : profondeur        (7 bits, [0, 127])
-///   bits 28-29 : TTFlag            (2 bits : 0=Exact, 1=Lower, 2=Upper)
-///   bits 30-35 : case départ       (6 bits)
-///   bits 36-41 : case arrivée      (6 bits)
+///   bits 21-27 : depth             (7 bits, [0, 127])
+///   bits 28-29 : TTFlag            (2 bits: 0=Exact, 1=Lower, 2=Upper)
+///   bits 30-35 : from square       (6 bits)
+///   bits 36-41 : to square         (6 bits)
 ///   bits 42-44 : MoveFlags         (3 bits)
-///   bits 45-47 : pièce promotion   (3 bits)
-///   bits 48-55 : génération        (8 bits) ← NOUVEAU
-///   bits 56-63 : inutilisés
+///   bits 45-47 : promotion piece   (3 bits)
+///   bits 48-55 : generation        (8 bits) ← NEW
+///   bits 56-63 : unused
 fn pack_data(score: i32, depth: i32, flag: TTFlag, mv: Move, gen: u8) -> u64 {
     let s  = (score + 1_000_000) as u64;   // 21 bits
     let d  = depth as u64;                  //  7 bits
@@ -103,7 +103,7 @@ fn pack_data(score: i32, depth: i32, flag: TTFlag, mv: Move, gen: u8) -> u64 {
     s | (d << 21) | (f << 28) | (fr << 30) | (to << 36) | (mf << 42) | (p << 45) | (g << 48)
 }
 
-/// Décompresse un u64 en (score, profondeur, flag, coup, génération).
+/// Decompresses a u64 into (score, depth, flag, move, generation).
 fn unpack_data(data: u64) -> (i32, i32, TTFlag, Move, u8) {
     let score = (data & 0x1F_FFFF) as i32 - 1_000_000;
     let depth = ((data >> 21) & 0x7F) as i32;
@@ -132,52 +132,52 @@ fn unpack_data(data: u64) -> (i32, i32, TTFlag, Move, u8) {
 }
 
 // =============================================================================
-// Table de transposition
+// Transposition table
 // =============================================================================
 
-/// Table de transposition lock-free, partageable entre threads via Arc.
+/// Lock-free transposition table, shareable between threads via Arc.
 ///
-/// Utilise des paires AtomicU64 (key, data) pour chaque entrée.
-/// Les races bénignes (lecture d'une entrée en cours d'écriture) se
-/// traduisent par un cache-miss — jamais par une erreur de logique.
+/// Uses AtomicU64 pairs (key, data) for each entry.
+/// Benign races (reading an entry currently being written) result
+/// in a cache-miss — never a logic error.
 pub struct TranspositionTable {
-    /// Tableau de slots atomiques.
+    /// Array of atomic slots.
     slots:      Vec<TtSlot>,
-    /// Masque d'indexation (slots.len() - 1, toujours une puissance de 2).
+    /// Indexing mask (slots.len() - 1, always a power of 2).
     mask:       u64,
-    /// Numéro de génération courant (incrémenté à chaque commande "go").
-    /// Permet de distinguer les entrées fraîches des entrées périmées.
+    /// Current generation number (incremented on each "go" command).
+    /// Allows distinguishing fresh entries from stale ones.
     generation: AtomicU8,
 }
 
-// SAFETY : TtSlot contient uniquement des AtomicU64 qui sont Sync.
-// TranspositionTable est donc Sync, et donc Arc<TranspositionTable> est Send+Sync.
+// SAFETY: TtSlot only contains AtomicU64, which are Sync.
+// TranspositionTable is therefore Sync, and thus Arc<TranspositionTable> is Send+Sync.
 unsafe impl Send for TranspositionTable {}
 unsafe impl Sync for TranspositionTable {}
 
 impl TranspositionTable {
-    /// Tente de créer une table de transposition de `size_mb` Mo, SANS jamais
-    /// avorter le programme. La taille réelle est arrondie à la puissance de 2
-    /// inférieure. Retourne `None` si l'allocation échoue (mémoire insuffisante).
+    /// Attempts to create a transposition table of `size_mb` MB, WITHOUT ever
+    /// aborting the program. The actual size is rounded down to the nearest
+    /// power of 2. Returns `None` if the allocation fails (insufficient memory).
     ///
-    /// Robustesse : l'allocation utilise `Vec::try_reserve_exact`, qui renvoie
-    /// une erreur au lieu d'appeler `handle_alloc_error` (abandon du processus)
-    /// quand l'allocateur ne peut pas fournir la mémoire. C'est la base du repli
-    /// gracieux côté UCI : un réglage `Hash` trop ambitieux ne tue plus le moteur.
+    /// Robustness: the allocation uses `Vec::try_reserve_exact`, which returns
+    /// an error instead of calling `handle_alloc_error` (process abort)
+    /// when the allocator cannot supply the memory. This is the basis of the
+    /// graceful fallback on the UCI side: an overly ambitious `Hash` setting no longer kills the engine.
     ///
-    /// Limite honnête : `try_reserve` capte les REFUS FRANCS de l'allocateur (le
-    /// vecteur de crash le plus courant). Sur les systèmes à sur-engagement
-    /// mémoire (overcommit), une réservation peut « réussir » virtuellement puis
-    /// pressurer la RAM lors du remplissage — ce cas-là exigerait d'interroger la
-    /// RAM physique (hors bibliothèque standard). Le repli reste une nette
-    /// amélioration : plus aucun abandon sur refus d'allocation.
+    /// Honest limitation: `try_reserve` catches OUTRIGHT REFUSALS from the
+    /// allocator (the most common crash vector). On systems with memory
+    /// overcommit, a reservation may "succeed" virtually and then pressure
+    /// RAM while filling it — that case would require querying physical
+    /// RAM (outside the standard library). The fallback remains a clear
+    /// improvement: no more aborts on allocation refusal.
     pub fn try_new(size_mb: usize) -> Option<TranspositionTable> {
-        // 2 AtomicU64 par slot = 16 octets par slot
+        // 2 AtomicU64 per slot = 16 bytes per slot
         let bytes_per_slot = 16usize;
         let total_bytes    = size_mb.saturating_mul(1024 * 1024);
         let num_slots_raw  = total_bytes / bytes_per_slot;
 
-        // Puissance de 2 inférieure ou égale
+        // Power of 2 less than or equal
         let mut num_slots = 1usize;
         while num_slots * 2 <= num_slots_raw {
             num_slots *= 2;
@@ -186,13 +186,13 @@ impl TranspositionTable {
 
         let mask = (num_slots - 1) as u64;
 
-        // Allocation FAILLIBLE : try_reserve_exact renvoie Err au lieu d'avorter.
+        // FALLIBLE allocation: try_reserve_exact returns Err instead of aborting.
         let mut slots: Vec<TtSlot> = Vec::new();
         if slots.try_reserve_exact(num_slots).is_err() {
             return None;
         }
-        // La capacité est désormais garantie → ces push ne réallouent jamais
-        // (donc ne peuvent pas échouer).
+        // The capacity is now guaranteed → these pushes never reallocate
+        // (so they cannot fail).
         for _ in 0..num_slots {
             slots.push(TtSlot { key: AtomicU64::new(0), data: AtomicU64::new(0) });
         }
@@ -200,12 +200,12 @@ impl TranspositionTable {
         Some(TranspositionTable { slots, mask, generation: AtomicU8::new(0) })
     }
 
-    /// Crée une table de transposition de `size_mb` Mo avec REPLI GRACIEUX
-    /// garanti : si l'allocation échoue, la taille est divisée par deux jusqu'à
-    /// réussir. Ne panique JAMAIS — cohérent avec la priorité robustesse du
-    /// moteur. Utilisé au démarrage (où une petite taille réussit de toute façon).
-    /// Pour piloter finement le repli (message UCI, taille réelle retenue), la
-    /// couche UCI appelle plutôt `try_new()` directement.
+    /// Creates a transposition table of `size_mb` MB with GUARANTEED GRACEFUL
+    /// FALLBACK: if the allocation fails, the size is halved until it
+    /// succeeds. NEVER panics — consistent with the engine's robustness
+    /// priority. Used at startup (where a small size succeeds anyway).
+    /// To finely control the fallback (UCI message, actual size retained), the
+    /// UCI layer instead calls `try_new()` directly.
     pub fn new(size_mb: usize) -> TranspositionTable {
         let mut try_size = size_mb.max(1);
         loop {
@@ -213,14 +213,14 @@ impl TranspositionTable {
                 return tt;
             }
             if try_size <= 1 {
-                break; // même 1 Mo échoue : repli minimal ci-dessous
+                break; // even 1 MB fails: minimal fallback below
             }
             try_size /= 2;
         }
 
-        // Dernier recours absolu (système quasiment sans mémoire) : table d'un
-        // seul slot (mask = 0 → tout indexe le slot 0). Inefficace mais VALIDE
-        // et sans crash — toujours mieux que d'avorter.
+        // Absolute last resort (system with virtually no memory): a table of a
+        // single slot (mask = 0 → everything indexes slot 0). Inefficient but VALID
+        // and crash-free — always better than aborting.
         TranspositionTable {
             slots: vec![TtSlot { key: AtomicU64::new(0), data: AtomicU64::new(0) }],
             mask: 0,
@@ -228,33 +228,33 @@ impl TranspositionTable {
         }
     }
 
-    /// Calcule l'index d'un hash dans la table.
+    /// Computes the index of a hash in the table.
     #[inline]
     fn index(&self, hash: u64) -> usize {
         (hash & self.mask) as usize
     }
 
-    /// Précharge dans le cache la ligne contenant le slot associé à `hash`, sans
-    /// le lire ni rien retourner. À appeler dès que le hash de la position ENFANT
-    /// est connu (juste après make_move), AVANT la descente récursive : la latence
-    /// d'accès à la TT (souvent 64 Mio, fréquemment hors cache) est alors masquée
-    /// par le travail qui suit (gives_check, extensions, LMP…), de sorte que le
-    /// slot est déjà chaud quand l'enfant appelle probe().
+    /// Prefetches into the cache the line containing the slot associated with
+    /// `hash`, without reading it or returning anything. To be called as soon as
+    /// the CHILD position's hash is known (right after make_move), BEFORE the
+    /// recursive descent: the latency of accessing the TT (often 64 MiB,
+    /// frequently outside the cache) is then masked by the work that follows
+    /// (gives_check, extensions, LMP…), so that the slot is already warm when the child calls probe().
     ///
-    /// SÛRETÉ des blocs `unsafe` : les instructions de préchargement (`prfm` sur
-    /// aarch64, `_mm_prefetch` sur x86-64) sont de simples INDICATIONS matérielles.
-    /// Elles ne font JAMAIS faute — même sur une adresse invalide — et ne modifient
-    /// aucun état architectural observable. De plus le pointeur provient d'un slot
-    /// indexé dans les bornes (index() applique `& mask`), donc toujours valide.
-    /// Sur les autres architectures : no-op (le préchargement n'est qu'une
-    /// optimisation, jamais une nécessité de correction).
+    /// SAFETY of the `unsafe` blocks: the prefetch instructions (`prfm` on
+    /// aarch64, `_mm_prefetch` on x86-64) are simple hardware HINTS.
+    /// They NEVER fault — even on an invalid address — and modify no
+    /// observable architectural state. Moreover the pointer comes from a slot
+    /// indexed within bounds (index() applies `& mask`), so it is always valid.
+    /// On other architectures: no-op (prefetching is only an optimization,
+    /// never a correctness requirement).
     #[inline(always)]
     pub fn prefetch(&self, hash: u64) {
         let slot_ptr = &self.slots[self.index(hash)] as *const TtSlot;
 
         #[cfg(target_arch = "aarch64")]
-        // SAFETY : prfm est une indication de préchargement qui ne faute jamais
-        // et ne modifie aucun état observable (voir la doc ci-dessus).
+        // SAFETY: prfm is a prefetch hint that never faults
+        // and modifies no observable state (see the doc above).
         unsafe {
             core::arch::asm!(
                 "prfm pldl1keep, [{ptr}]",
@@ -264,8 +264,8 @@ impl TranspositionTable {
         }
 
         #[cfg(target_arch = "x86_64")]
-        // SAFETY : _mm_prefetch est une indication de préchargement qui ne faute
-        // jamais et ne modifie aucun état observable (voir la doc ci-dessus).
+        // SAFETY: _mm_prefetch is a prefetch hint that never faults
+        // and modifies no observable state (see the doc above).
         unsafe {
             core::arch::x86_64::_mm_prefetch(
                 slot_ptr as *const i8,
@@ -275,21 +275,21 @@ impl TranspositionTable {
 
         #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
         {
-            // Autres architectures : no-op. `let _` évite un warning unused.
+            // Other architectures: no-op. `let _` avoids an unused warning.
             let _ = slot_ptr;
         }
     }
 
-    /// Sonde la table pour un hash donné.
-    /// Retourne Some(entry) si une entrée valide est trouvée, None sinon.
+    /// Probes the table for a given hash.
+    /// Returns Some(entry) if a valid entry is found, None otherwise.
     ///
-    /// Thread-safe : les lectures Relaxed sont cohérentes pour une cache.
+    /// Thread-safe: Relaxed reads are consistent for a cache.
     pub fn probe(&self, hash: u64) -> Option<TTEntry> {
         let slot = &self.slots[self.index(hash)];
         let k    = slot.key.load(Ordering::Relaxed);
         let d    = slot.data.load(Ordering::Relaxed);
 
-        // Vérifier le hash et que le slot n'est pas vide
+        // Check the hash and that the slot is not empty
         if k != hash || d == 0 {
             return None;
         }
@@ -298,16 +298,16 @@ impl TranspositionTable {
         Some(TTEntry { hash, score, depth, flag, best_move })
     }
 
-    /// Stocke une entrée dans la table.
+    /// Stores an entry in the table.
     ///
-    /// Politique de remplacement par génération + profondeur :
-    ///   - Slot vide → toujours écrire.
-    ///   - Génération différente (entrée périmée d'une recherche précédente)
-    ///     → toujours remplacer : une entrée fraîche à profondeur 1 vaut mieux
-    ///     qu'une entrée périmée à profondeur 8.
-    ///   - Même génération → remplacer uniquement si profondeur >= ancienne.
+    /// Replacement policy by generation + depth:
+    ///   - Empty slot → always write.
+    ///   - Different generation (stale entry from a previous search)
+    ///     → always replace: a fresh entry at depth 1 is worth more
+    ///     than a stale entry at depth 8.
+    ///   - Same generation → replace only if depth >= old.
     ///
-    /// Thread-safe : les écritures Relaxed sont suffisantes pour une cache.
+    /// Thread-safe: Relaxed writes are sufficient for a cache.
     pub fn store(
         &self,
         hash:      u64,
@@ -322,30 +322,30 @@ impl TranspositionTable {
 
         if old_data != 0 {
             let (_, old_depth, _, _, old_gen) = unpack_data(old_data);
-            // Même génération : conserver les entrées plus profondes.
-            // Génération différente : toujours remplacer (entrée périmée).
+            // Same generation: keep deeper entries.
+            // Different generation: always replace (stale entry).
             if old_gen == current_gen && depth < old_depth {
                 return;
             }
         }
 
         let data = pack_data(score, depth, flag, best_move, current_gen);
-        // Écrire data AVANT key pour minimiser les races bénignes
+        // Write data BEFORE key to minimize benign races
         slot.data.store(data, Ordering::Relaxed);
         slot.key.store(hash,  Ordering::Relaxed);
     }
 
-    /// Incrémente le numéro de génération au début d'une nouvelle recherche.
+    /// Increments the generation number at the start of a new search.
     ///
-    /// Toutes les entrées existantes seront considérées périmées lors du prochain
-    /// store(), et remplaceables même par des entrées à profondeur plus faible.
-    /// Appeler une fois au début de chaque commande "go".
+    /// All existing entries will be considered stale on the next
+    /// store(), and replaceable even by entries with lower depth.
+    /// Call once at the start of each "go" command.
     pub fn new_search(&self) {
         self.generation.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Vide toute la table (entre deux parties).
-    /// Thread-safe : utilise des stores atomiques.
+    /// Clears the entire table (between two games).
+    /// Thread-safe: uses atomic stores.
     pub fn clear(&self) {
         for slot in &self.slots {
             slot.key.store(0,  Ordering::Relaxed);
@@ -353,11 +353,11 @@ impl TranspositionTable {
         }
     }
 
-    /// Estime le taux de remplissage de la table en permills (0–1000).
+    /// Estimates the table's fill rate in permille (0–1000).
     ///
-    /// Échantillonne les 1 000 premiers slots (ou tous si la table est plus petite).
-    /// Chaque slot dont le champ `data` est non nul est considéré comme occupé.
-    /// Utilisé par le protocole UCI (commande "info hashfull <n>").
+    /// Samples the first 1,000 slots (or all if the table is smaller).
+    /// Each slot whose `data` field is non-zero is considered occupied.
+    /// Used by the UCI protocol ("info hashfull <n>" command).
     pub fn hashfull(&self) -> u32 {
         let sample = self.slots.len().min(1000);
         if sample == 0 { return 0; }
@@ -368,8 +368,8 @@ impl TranspositionTable {
         (filled * 1000 / sample) as u32
     }
 
-    /// Ajuste un score de mat issu de la table pour la profondeur actuelle.
-    /// Les scores de mat sont stockés relatifs à la racine.
+    /// Adjusts a mate score from the table for the current depth.
+    /// Mate scores are stored relative to the root.
     pub fn adjust_score_from_tt(score: i32, ply: i32) -> i32 {
         use crate::utils::types::SCORE_MATE;
         if score > SCORE_MATE - 200 {
@@ -381,7 +381,7 @@ impl TranspositionTable {
         }
     }
 
-    /// Ajuste un score de mat pour le stockage dans la table.
+    /// Adjusts a mate score for storage in the table.
     pub fn adjust_score_for_tt(score: i32, ply: i32) -> i32 {
         use crate::utils::types::SCORE_MATE;
         if score > SCORE_MATE - 200 {

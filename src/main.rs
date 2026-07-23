@@ -1,26 +1,26 @@
 // =============================================================================
 // Vendetta Chess Motor — src/main.rs
 //
-// Rôle : Point d'entrée du programme. Initialise les tables nécessaires
-//        et lance la boucle principale UCI.
+// Role: Program entry point. Initializes the necessary tables
+//        and starts the main UCI loop.
 //
-// Au démarrage :
-//   1. Initialisation des tables d'attaque précalculées (cavalier, roi)
-//   2. Lancement de la boucle UCI (lecture de stdin, écriture sur stdout)
+// On startup:
+//   1. Initialization of precomputed attack tables (knight, king)
+//   2. Launch of the UCI loop (reading from stdin, writing to stdout)
 //
-// Le moteur communique exclusivement via stdin/stdout selon le protocole UCI.
-// Il ne doit pas afficher d'interface graphique ni ouvrir de fenêtre.
+// The engine communicates exclusively via stdin/stdout according to the UCI protocol.
+// It must not display a graphical interface or open a window.
 // =============================================================================
 
 use vendetta_chess_motor::board::bitboard::init_attack_tables;
 use vendetta_chess_motor::uci::UciEngine;
 
 fn main() {
-    // Initialiser les tables d'attaque précalculées pour le cavalier et le roi.
-    // Doit être fait avant toute utilisation des fonctions de génération de coups.
+    // Initialize the precomputed attack tables for the knight and king.
+    // Must be done before any use of the move generation functions.
     init_attack_tables();
 
-    // Lancer le moteur UCI
+    // Start the UCI engine
     let mut engine = UciEngine::new();
     engine.run();
 }

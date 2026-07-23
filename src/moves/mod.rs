@@ -1,27 +1,27 @@
 // =============================================================================
 // Vendetta Chess Motor — src/moves/mod.rs
 //
-// Rôle : Coordinateur de la génération des coups. Ce module est le point
-//        d'entrée principal pour obtenir la liste des coups légaux d'une
+// Role: Coordinator of move generation. This module is the main entry
+//        point for obtaining the list of legal moves of a
 //        position.
 //
-// Contenu :
-//   - is_square_attacked() : détecte si une case est attaquée par une couleur
-//   - is_in_check()        : détecte si un roi est en échec
-//   - generate_legal_moves() : génère tous les coups LÉGAUX (zéro coup illégal)
-//   - generate_pseudo_moves() : génère les coups pseudo-légaux (usage interne)
-//   - perft()              : fonction de test pour valider la génération des coups
+// Contents:
+//   - is_square_attacked() : detects if a square is attacked by a color
+//   - is_in_check()        : detects if a king is in check
+//   - generate_legal_moves() : generates all LEGAL moves (zero illegal move)
+//   - generate_pseudo_moves() : generates pseudo-legal moves (internal use)
+//   - perft()              : test function to validate move generation
 //
-// Principe de génération légale :
-//   1. On génère tous les pseudo-coups (peuvent laisser le roi en échec)
-//   2. Pour chaque pseudo-coup, on le joue sur le plateau
-//   3. Si le roi n'est pas en échec après le coup, c'est un coup légal
-//   4. On annule le coup
+// Legal generation principle:
+//   1. We generate all pseudo-moves (may leave the king in check)
+//   2. For each pseudo-move, we play it on the board
+//   3. If the king is not in check after the move, it is a legal move
+//   4. We undo the move
 //
-//   Pour le roque, on vérifie en plus que le roi ne passe pas par une case
-//   attaquée et n'est pas en échec au départ.
+//   For castling, we additionally check that the king does not pass through a
+//   square that is attacked and is not in check at the start.
 //
-// Philosophie : correction absolue. Zéro coup illégal possible.
+// Philosophy: absolute correctness. Zero illegal move possible.
 // =============================================================================
 
 pub mod pawn;
@@ -42,45 +42,45 @@ use crate::board::bitboard::{
 };
 
 // =============================================================================
-// MoveList — liste de coups à capacité fixe, allouée sur la PILE
+// MoveList — fixed-capacity move list, allocated on the STACK
 // =============================================================================
 
-/// Capacité maximale d'une MoveList.
+/// Maximum capacity of a MoveList.
 ///
-/// Le record de coups LÉGAUX dans une position d'échecs est 218 ; les
-/// pseudo-légaux générés avant filtrage restent bornés bien en dessous. 256
-/// offre une marge confortable tout en restant une puissance de 2.
+/// The record for LEGAL moves in a chess position is 218; the
+/// pseudo-legal moves generated before filtering remain bounded well below. 256
+/// offers a comfortable margin while remaining a power of 2.
 pub const MAX_MOVE_LIST: usize = 256;
 
-/// Liste de coups à capacité fixe (`[Move; 256]`), allouée sur la PILE — donc
-/// AUCUNE allocation tas par nœud, contrairement à `Vec<Move>`. C'est le gain
-/// mémoire le plus important sur le chemin chaud : la quiescence représente
-/// 80-90 % des nœuds, chacun générant au moins une liste de coups.
+/// Fixed-capacity move list (`[Move; 256]`), allocated on the STACK — therefore
+/// NO heap allocation per node, unlike `Vec<Move>`. This is the most
+/// significant memory gain on the hot path: quiescence represents
+/// 80-90% of nodes, each generating at least one move list.
 ///
-/// Zéro dépendance externe (pas d'`arrayvec`) — conforme à la philosophie du
-/// projet. Se comporte comme une slice `[Move]` via Deref/DerefMut : `len()`,
-/// `iter()`, indexation, `swap()`, slicing, `to_vec()`, `is_empty()` fonctionnent
-/// directement, sans méthode dédiée.
+/// Zero external dependency (no `arrayvec`) — consistent with the project's
+/// philosophy. Behaves like a `[Move]` slice via Deref/DerefMut: `len()`,
+/// `iter()`, indexing, `swap()`, slicing, `to_vec()`, `is_empty()` work
+/// directly, without a dedicated method.
 pub struct MoveList {
     moves: [Move; MAX_MOVE_LIST],
     len:   usize,
 }
 
 impl MoveList {
-    /// Crée une liste vide. Le tampon est pré-rempli de `Move::NULL` (jamais
-    /// lu au-delà de `len` grâce au Deref qui tranche à `..len`).
+    /// Creates an empty list. The buffer is pre-filled with `Move::NULL` (never
+    /// read beyond `len` thanks to the Deref which slices to `..len`).
     #[inline]
     pub fn new() -> MoveList {
         MoveList { moves: [Move::NULL; MAX_MOVE_LIST], len: 0 }
     }
 
-    /// Ajoute un coup en fin de liste.
+    /// Adds a move at the end of the list.
     ///
-    /// Le générateur ne produit jamais plus de coups que `MAX_MOVE_LIST` (le
-    /// maximum légal théorique est 218). En développement, un `debug_assert!`
-    /// détecte tout dépassement ; en release on ignore silencieusement un
-    /// débordement (impossible en pratique) plutôt que de paniquer ou d'écrire
-    /// hors bornes — cohérent avec la politique "jamais de panic en production".
+    /// The generator never produces more moves than `MAX_MOVE_LIST` (the
+    /// theoretical legal maximum is 218). In development, a `debug_assert!`
+    /// detects any overflow; in release, an overflow is silently ignored
+    /// (impossible in practice) rather than panicking or writing out
+    /// of bounds — consistent with the "never panic in production" policy.
     #[inline]
     pub fn push(&mut self, mv: Move) {
         debug_assert!(self.len < MAX_MOVE_LIST,
@@ -91,8 +91,8 @@ impl MoveList {
         }
     }
 
-    /// Ne conserve que les coups satisfaisant le prédicat (équivalent de
-    /// `Vec::retain`, compactage en place en O(n)).
+    /// Keeps only the moves satisfying the predicate (equivalent to
+    /// `Vec::retain`, in-place compaction in O(n)).
     #[inline]
     pub fn retain<F: FnMut(&Move) -> bool>(&mut self, mut keep: F) {
         let mut write = 0usize;
@@ -105,7 +105,7 @@ impl MoveList {
         self.len = write;
     }
 
-    /// Vide la liste (longueur remise à zéro ; le tampon n'est pas effacé).
+    /// Empties the list (length reset to zero; the buffer is not cleared).
     #[inline]
     pub fn clear(&mut self) {
         self.len = 0;
@@ -133,30 +133,30 @@ impl std::ops::DerefMut for MoveList {
 }
 
 // =============================================================================
-// Détection d'attaques
+// Attack detection
 // =============================================================================
 
-/// Retourne true si la case `sq` est attaquée par la couleur `attacker`.
-/// Vérifie toutes les pièces de la couleur attaquante.
+/// Returns true if the square `sq` is attacked by the color `attacker`.
+/// Checks all pieces of the attacking color.
 pub fn is_square_attacked(board: &Board, sq: u8, attacker: Color) -> bool {
     let occupied = board.all_pieces;
     let sq_bb: Bitboard = 1u64 << sq;
 
-    // --- Attaque par cavalier ---
+    // --- Knight attack ---
     let knights = board.pieces[attacker.index()][Piece::Knight.index()];
     if knight_attacks(sq) & knights != 0 {
         return true;
     }
 
-    // --- Attaque par roi ---
+    // --- King attack ---
     let king = board.pieces[attacker.index()][Piece::King.index()];
     if king_attacks(sq) & king != 0 {
         return true;
     }
 
-    // --- Attaque par pion ---
-    // Les pions attaquent en diagonale. On vérifie si un pion adverse
-    // peut atteindre `sq` depuis ses cases d'attaque.
+    // --- Pawn attack ---
+    // Pawns attack diagonally. We check if an enemy pawn
+    // can reach `sq` from its attack squares.
     let pawns = board.pieces[attacker.index()][Piece::Pawn.index()];
     let pawn_attacks = match attacker {
         Color::White => white_pawn_attacks(pawns),
@@ -166,14 +166,14 @@ pub fn is_square_attacked(board: &Board, sq: u8, attacker: Color) -> bool {
         return true;
     }
 
-    // --- Attaque par tour ou dame (lignes horizontales/verticales) ---
+    // --- Rook or queen attack (horizontal/vertical lines) ---
     let rooks_queens = board.pieces[attacker.index()][Piece::Rook.index()]
                      | board.pieces[attacker.index()][Piece::Queen.index()];
     if rook_attacks(sq, occupied) & rooks_queens != 0 {
         return true;
     }
 
-    // --- Attaque par fou ou dame (diagonales) ---
+    // --- Bishop or queen attack (diagonals) ---
     let bishops_queens = board.pieces[attacker.index()][Piece::Bishop.index()]
                        | board.pieces[attacker.index()][Piece::Queen.index()];
     if bishop_attacks(sq, occupied) & bishops_queens != 0 {
@@ -183,18 +183,18 @@ pub fn is_square_attacked(board: &Board, sq: u8, attacker: Color) -> bool {
     false
 }
 
-/// Retourne true si le roi de la couleur `color` est en échec.
+/// Returns true if the king of the color `color` is in check.
 pub fn is_in_check(board: &Board, color: Color) -> bool {
     let king_sq = board.king_square(color);
     is_square_attacked(board, king_sq, color.opposite())
 }
 
 // =============================================================================
-// Génération des coups
+// Move generation
 // =============================================================================
 
-/// Génère tous les pseudo-coups (peuvent laisser le roi en échec).
-/// Appelé en interne par generate_legal_moves().
+/// Generates all pseudo-moves (may leave the king in check).
+/// Called internally by generate_legal_moves().
 fn generate_pseudo_moves(board: &Board, moves: &mut crate::moves::MoveList) {
     let color = board.side_to_move;
     pawn::generate_pawn_moves(board, color, moves);
@@ -205,55 +205,55 @@ fn generate_pseudo_moves(board: &Board, moves: &mut crate::moves::MoveList) {
     king::generate_king_moves(board, color, moves);
 }
 
-/// Génère tous les coups LÉGAUX de la position courante.
-/// Garantit : aucun coup retourné ne laisse le roi en échec.
-/// Garantit : les roques sont validés (roi non en échec, cases traversées sûres).
+/// Generates all LEGAL moves of the current position.
+/// Guarantee: no returned move leaves the king in check.
+/// Guarantee: castling moves are validated (king not in check, squares crossed are safe).
 pub fn generate_legal_moves(board: &mut Board) -> Vec<Move> {
-    // Wrapper conservé pour les appelants HORS chemin chaud (perft, tuner,
-    // extract_positions, benchmark, tests, parsing UCI) — il alloue un Vec, mais
-    // ces usages ne sont pas critiques pour le NPS. Le moteur (alpha_beta /
-    // quiescence) utilise generate_legal_moves_into() qui n'alloue rien.
+    // Wrapper kept for callers OUTSIDE the hot path (perft, tuner,
+    // extract_positions, benchmark, tests, UCI parsing) — it allocates a Vec, but
+    // these usages are not critical for NPS. The engine (alpha_beta /
+    // quiescence) uses generate_legal_moves_into() which allocates nothing.
     let mut list = MoveList::new();
     generate_legal_moves_into(board, &mut list);
     list.to_vec()
 }
 
-/// Version zéro-allocation de generate_legal_moves() : remplit la `MoveList`
-/// fournie par l'appelant (typiquement allouée sur la pile dans la recherche).
-/// La liste est vidée au début — son contenu précédent est ignoré.
+/// Zero-allocation version of generate_legal_moves(): fills the `MoveList`
+/// provided by the caller (typically stack-allocated in the search).
+/// The list is cleared at the start — its previous content is ignored.
 pub fn generate_legal_moves_into(board: &mut Board, out: &mut MoveList) {
     out.clear();
 
-    // Pseudo-coups générés sur la pile (aucune allocation tas).
+    // Pseudo-moves generated on the stack (no heap allocation).
     let mut pseudo_moves = MoveList::new();
     generate_pseudo_moves(board, &mut pseudo_moves);
 
-    // Filtrage légal : chemin rapide (clouages) pour le cas courant, make/unmake
-    // pour les cas délicats. Voir filter_legal_into().
+    // Legal filtering: fast path (pins) for the common case, make/unmake
+    // for the tricky cases. See filter_legal_into().
     filter_legal_into(board, &pseudo_moves, out);
 }
 
-/// Vérifie si un coup de roque est légal :
-/// - Le roi ne doit pas être en échec au départ
-/// - Les cases traversées par le roi ne doivent pas être attaquées
+/// Checks if a castling move is legal:
+/// - The king must not be in check at the start
+/// - The squares crossed by the king must not be attacked
 fn is_castling_legal(board: &Board, mv: &Move, color: Color) -> bool {
     let enemy = color.opposite();
     let king_sq = mv.from;
 
-    // Le roi ne doit pas être en échec au départ
+    // The king must not be in check at the start
     if is_square_attacked(board, king_sq, enemy) {
         return false;
     }
 
-    // Vérifier les cases traversées par le roi
+    // Check the squares crossed by the king
     match mv.flags {
         MoveFlags::CastleKingside => {
-            // Le roi passe par f1/f8 (king_sq + 1) et arrive en g1/g8 (king_sq + 2)
+            // The king passes through f1/f8 (king_sq + 1) and arrives at g1/g8 (king_sq + 2)
             if is_square_attacked(board, king_sq + 1, enemy) { return false; }
             if is_square_attacked(board, king_sq + 2, enemy) { return false; }
         }
         MoveFlags::CastleQueenside => {
-            // Le roi passe par d1/d8 (king_sq - 1) et arrive en c1/c8 (king_sq - 2)
+            // The king passes through d1/d8 (king_sq - 1) and arrives at c1/c8 (king_sq - 2)
             if is_square_attacked(board, king_sq - 1, enemy) { return false; }
             if is_square_attacked(board, king_sq - 2, enemy) { return false; }
         }
@@ -264,25 +264,25 @@ fn is_castling_legal(board: &Board, mv: &Move, color: Color) -> bool {
 }
 
 // =============================================================================
-// Filtrage légal accéléré par détection des clouages
+// Legal filtering accelerated by pin detection
 // =============================================================================
 
-/// Bitboard des pièces de `us` ABSOLUMENT clouées sur leur roi (ne peuvent
-/// bouger que le long de la ligne du clouage sans exposer le roi).
+/// Bitboard of the pieces of `us` ABSOLUTELY pinned to their king (can only
+/// move along the pin line without exposing the king).
 ///
-/// PRÉCONDITION : le roi de `us` n'est PAS en échec (le chemin rapide de
-/// filter_legal_into() n'appelle cette fonction que dans ce cas). Sous cette
-/// précondition, le résultat est EXACT — ni faux positif ni faux négatif :
-///   - On part des pièces de `us` qui bloquent EN PREMIER une ligne du roi
-///     (`rook_attacks`/`bishop_attacks` depuis le roi s'arrêtent au 1er bloqueur).
-///   - On retire chaque bloqueur et on regarde si une pièce glissante adverse du
-///     bon type (tour/dame en ligne, fou/dame en diagonale) attaque alors le roi.
-///     Comme le roi n'était PAS en échec, aucune glissante n'attaquait avant :
-///     un attaquant révélé par le retrait ne peut venir que de la ligne de ce
-///     bloqueur → le bloqueur est réellement cloué.
+/// PRECONDITION: the king of `us` is NOT in check (the fast path of
+/// filter_legal_into() only calls this function in that case). Under this
+/// precondition, the result is EXACT — neither false positive nor false negative:
+///   - We start from the pieces of `us` that block a king line FIRST
+///     (`rook_attacks`/`bishop_attacks` from the king stop at the 1st blocker).
+///   - We remove each blocker and check whether an enemy sliding piece of the
+///     right type (rook/queen on a line, bishop/queen on a diagonal) then attacks the king.
+///     Since the king was NOT in check, no sliding piece was attacking before:
+///     an attacker revealed by the removal can only come from that
+///     blocker's line → the blocker is genuinely pinned.
 ///
-/// Le coût est de quelques lookups magiques par nœud (un par pièce bloquant une
-/// ligne du roi, typiquement 0 à 4), bien moins cher que ~35 make/unmake.
+/// The cost is a few magic lookups per node (one per piece blocking a
+/// king line, typically 0 to 4), much cheaper than ~35 make/unmake.
 fn pinned_pieces(board: &Board, us: Color) -> Bitboard {
     let king_sq = board.king_square(us);
     let them    = us.opposite();
@@ -296,7 +296,7 @@ fn pinned_pieces(board: &Board, us: Color) -> Bitboard {
 
     let mut pinned: Bitboard = 0;
 
-    // Clouages le long des lignes droites (tours / dames).
+    // Pins along straight lines (rooks / queens).
     let mut blockers = rook_attacks(king_sq, occ) & own;
     while blockers != 0 {
         let sq = pop_lsb(&mut blockers);
@@ -305,7 +305,7 @@ fn pinned_pieces(board: &Board, us: Color) -> Bitboard {
         }
     }
 
-    // Clouages le long des diagonales (fous / dames).
+    // Pins along diagonals (bishops / queens).
     let mut blockers = bishop_attacks(king_sq, occ) & own;
     while blockers != 0 {
         let sq = pop_lsb(&mut blockers);
@@ -317,26 +317,26 @@ fn pinned_pieces(board: &Board, us: Color) -> Bitboard {
     pinned
 }
 
-/// Filtre les pseudo-coups `pseudo` en coups LÉGAUX, ajoutés dans `out`.
+/// Filters the `pseudo` pseudo-moves into LEGAL moves, added to `out`.
 ///
-/// CHEMIN RAPIDE (zéro make/unmake) pour le cas courant — pas en échec, pièce
-/// ni clouée ni roi, ni roque, ni prise en passant : le coup est légal par
-/// construction. Justification : si le roi n'est pas en échec, déplacer une
-/// pièce NON clouée (autre que le roi) ne peut pas exposer son propre roi (seul
-/// le retrait d'un cloueur le pourrait). La case d'arrivée est sans incidence
-/// pour une pièce autre que le roi.
+/// FAST PATH (zero make/unmake) for the common case — not in check, piece
+/// neither pinned nor king, neither castling nor en passant capture: the move is legal by
+/// construction. Justification: if the king is not in check, moving a
+/// NON-pinned piece (other than the king) cannot expose its own king (only
+/// removing a pinner could). The destination square is irrelevant
+/// for a piece other than the king.
 ///
-/// CHEMIN SÛR (make / is_in_check / unmake) pour tous les autres cas : en échec
-/// (le roi doit répondre), coup du roi (peut entrer en échec), roque (validé en
-/// plus par is_castling_legal — cases traversées), prise en passant (échec à la
-/// découverte horizontal après retrait du pion capturé, qu'un simple test de
-/// clouage du pion qui joue ne détecte pas), ou pièce clouée (légale seulement
-/// le long de la ligne — vérifié par make/unmake).
+/// SAFE PATH (make / is_in_check / unmake) for all other cases: in check
+/// (the king must respond), king move (may enter check), castling (additionally validated
+/// by is_castling_legal — squares crossed), en passant capture (horizontal discovered
+/// check after removal of the captured pawn, which a simple pin test on
+/// the moving pawn does not detect), or pinned piece (legal only
+/// along the line — checked by make/unmake).
 ///
-/// FILET DE SÉCURITÉ : en build de DEBUG uniquement, chaque décision du chemin
-/// rapide est revérifiée contre make/unmake. Toute divergence (un clouage qui
-/// aurait été manqué) fait échouer immédiatement perft / `cargo test`, AVANT
-/// toute partie réelle. En release, le chemin rapide ne fait aucun make/unmake.
+/// SAFETY NET: in DEBUG build only, each fast-path decision is
+/// re-checked against make/unmake. Any divergence (a pin that would
+/// have been missed) makes perft / `cargo test` fail immediately, BEFORE
+/// any real game. In release, the fast path performs no make/unmake.
 fn filter_legal_into(board: &mut Board, pseudo: &MoveList, out: &mut MoveList) {
     let us       = board.side_to_move;
     let in_check = is_in_check(board, us);
@@ -350,9 +350,9 @@ fn filter_legal_into(board: &mut Board, pseudo: &MoveList, out: &mut MoveList) {
             || (pinned & (1u64 << mv.from)) != 0;
 
         if needs_full_check {
-            // Roque : validation supplémentaire (roi non en échec, cases
-            // traversées non attaquées). Le `from` d'un roque EST la case du roi,
-            // donc ce cas est bien capté par `mv.from == king_sq` ci-dessus.
+            // Castling: additional validation (king not in check, squares
+            // crossed not attacked). The `from` of a castling move IS the king's square,
+            // so this case is indeed captured by `mv.from == king_sq` above.
             if (mv.flags == MoveFlags::CastleKingside
                 || mv.flags == MoveFlags::CastleQueenside)
                 && !is_castling_legal(board, &mv, us)
@@ -366,12 +366,12 @@ fn filter_legal_into(board: &mut Board, pseudo: &MoveList, out: &mut MoveList) {
                 out.push(mv);
             }
         } else {
-            // Chemin rapide : coup légal garanti par construction.
+            // Fast path: legal move guaranteed by construction.
             #[cfg(debug_assertions)]
             {
-                // Filet de sécurité (debug uniquement) : revérifier que le coup
-                // est bien légal. Si ce debug_assert se déclenche, pinned_pieces
-                // a manqué un clouage — bug à corriger avant toute partie.
+                // Safety net (debug only): re-check that the move
+                // is indeed legal. If this debug_assert triggers, pinned_pieces
+                // missed a pin — bug to fix before any real game.
                 board.make_move(mv);
                 let really_legal = !is_in_check(board, us);
                 board.unmake_move(mv);
@@ -388,46 +388,46 @@ fn filter_legal_into(board: &mut Board, pseudo: &MoveList, out: &mut MoveList) {
 }
 
 // =============================================================================
-// Génération rapide des captures (pour la recherche de quiescence)
+// Fast generation of captures (for quiescence search)
 //
-// Principe : générer UNIQUEMENT les pseudo-captures (captures, en passant,
-// promotion-captures), puis filtrer la légalité via make/unmake.
+// Principle: generate ONLY pseudo-captures (captures, en passant,
+// promotion-captures), then filter legality via make/unmake.
 //
-// Pourquoi c'est critique :
-//   L'ancienne implémentation appelait generate_legal_moves() (make/unmake pour
-//   ~35 pseudo-coups en moyenne) puis jetait ~30 coups silencieux.
-//   La nouvelle ne fait make/unmake que sur ~5 pseudo-captures en moyenne.
-//   La quiescence représentant 80-90% des nœuds totaux, c'est le gain le plus
-//   important possible sur les NPS.
+// Why this is critical:
+//   The old implementation called generate_legal_moves() (make/unmake for
+//   ~35 pseudo-moves on average) then silently discarded ~30 moves.
+//   The new one only does make/unmake on ~5 pseudo-captures on average.
+//   Since quiescence represents 80-90% of total nodes, this is the largest
+//   possible gain on NPS.
 //
-// Captures générées (identiques à l'ancienne implémentation) :
-//   ✓ Captures normales de toutes les pièces
-//   ✓ Prises en passant
+// Captures generated (identical to the old implementation):
+//   ✓ Normal captures of all pieces
+//   ✓ En passant captures
 //   ✓ Promotion-captures (×4 promotions)
-//   ✗ Promotions silencieuses (non incluses, comme avant)
-//   ✗ Roques (jamais des captures)
+//   ✗ Silent promotions (not included, as before)
+//   ✗ Castling (never captures)
 // =============================================================================
 
-/// Génère les pseudo-captures des pions de la couleur `color`.
+/// Generates the pseudo-captures for pawns of color `color`.
 ///
-/// Inclut : captures diagonales normales, promotion-captures, prises en passant.
-/// N'inclut PAS les poussées simples, poussées doubles, ni promotions silencieuses.
+/// Includes: normal diagonal captures, promotion-captures, en passant captures.
+/// Does NOT include single pushes, double pushes, or silent promotions.
 ///
-/// La logique bitboard est une extraction directe de pawn.rs — seules les
-/// branches "captures" sont conservées, les branches "push" sont supprimées.
+/// The bitboard logic is a direct extraction from pawn.rs — only the
+/// "capture" branches are kept, the "push" branches are removed.
 fn generate_pawn_captures(board: &Board, color: Color, moves: &mut crate::moves::MoveList) {
     let pawns = board.pieces[color.index()][Piece::Pawn.index()];
     let enemy = board.occupancy[color.opposite().index()];
 
     match color {
         // -----------------------------------------------------------------------
-        // Pions BLANCS — avancent vers les rangs croissants (+8 par rang)
+        // WHITE pawns — advance toward increasing ranks (+8 per rank)
         // -----------------------------------------------------------------------
         Color::White => {
-            // --- Captures vers le Nord-Est (diagonale droite) ---
-            // Un pion blanc sur sq capture sur sq+9 si sq n'est pas sur la colonne H.
+            // --- Captures toward the North-East (right diagonal) ---
+            // A white pawn on sq captures on sq+9 if sq is not on the H file.
             let cap_ne       = ((pawns & !FILE_H) << 9) & enemy;
-            let cap_ne_promo = cap_ne & RANK_8;   // Capture sur la dernière rangée → promo
+            let cap_ne_promo = cap_ne & RANK_8;   // Capture on the last rank → promotion
             let cap_ne_norm  = cap_ne & !RANK_8;
 
             let mut bb = cap_ne_norm;
@@ -440,15 +440,15 @@ fn generate_pawn_captures(board: &Board, color: Color, moves: &mut crate::moves:
             while bb != 0 {
                 let to   = pop_lsb(&mut bb);
                 let from = to - 9;
-                // Toujours émettre les 4 pièces — la GUI choisira
-                moves.push(Move::promotion_capture(from, to, 4)); // Dame
-                moves.push(Move::promotion_capture(from, to, 3)); // Tour
-                moves.push(Move::promotion_capture(from, to, 2)); // Fou
-                moves.push(Move::promotion_capture(from, to, 1)); // Cavalier
+                // Always emit all 4 pieces — the GUI will choose
+                moves.push(Move::promotion_capture(from, to, 4)); // Queen
+                moves.push(Move::promotion_capture(from, to, 3)); // Rook
+                moves.push(Move::promotion_capture(from, to, 2)); // Bishop
+                moves.push(Move::promotion_capture(from, to, 1)); // Knight
             }
 
-            // --- Captures vers le Nord-Ouest (diagonale gauche) ---
-            // Un pion blanc sur sq capture sur sq+7 si sq n'est pas sur la colonne A.
+            // --- Captures toward the North-West (left diagonal) ---
+            // A white pawn on sq captures on sq+7 if sq is not on the A file.
             let cap_nw       = ((pawns & !FILE_A) << 7) & enemy;
             let cap_nw_promo = cap_nw & RANK_8;
             let cap_nw_norm  = cap_nw & !RANK_8;
@@ -469,11 +469,11 @@ fn generate_pawn_captures(board: &Board, color: Color, moves: &mut crate::moves:
                 moves.push(Move::promotion_capture(from, to, 1));
             }
 
-            // --- Prise en passant blanche ---
-            // Copie exacte de generate_white_pawn_moves() — même logique bitboard.
+            // --- White en passant capture ---
+            // Exact copy of generate_white_pawn_moves() — same bitboard logic.
             if let Some(ep_sq) = board.en_passant {
                 let ep_bb: Bitboard = 1u64 << ep_sq;
-                // Chercher les pions blancs pouvant atteindre ep_sq en diagonale
+                // Look for white pawns able to reach ep_sq diagonally
                 let ep_attackers =
                     (((ep_bb >> 9) & !FILE_H) | ((ep_bb >> 7) & !FILE_A)) & pawns;
                 let mut bb = ep_attackers;
@@ -485,13 +485,13 @@ fn generate_pawn_captures(board: &Board, color: Color, moves: &mut crate::moves:
         }
 
         // -----------------------------------------------------------------------
-        // Pions NOIRS — avancent vers les rangs décroissants (-8 par rang)
+        // BLACK pawns — advance toward decreasing ranks (-8 per rank)
         // -----------------------------------------------------------------------
         Color::Black => {
-            // --- Captures vers le Sud-Est (diagonale droite pour les noirs) ---
-            // Un pion noir sur sq capture sur sq-7 si sq n'est pas sur la colonne H.
+            // --- Captures toward the South-East (right diagonal for black) ---
+            // A black pawn on sq captures on sq-7 if sq is not on the H file.
             let cap_se       = ((pawns & !FILE_H) >> 7) & enemy;
-            let cap_se_promo = cap_se & RANK_1;   // Capture sur le rang 1 → promo
+            let cap_se_promo = cap_se & RANK_1;   // Capture on rank 1 → promotion
             let cap_se_norm  = cap_se & !RANK_1;
 
             let mut bb = cap_se_norm;
@@ -510,8 +510,8 @@ fn generate_pawn_captures(board: &Board, color: Color, moves: &mut crate::moves:
                 moves.push(Move::promotion_capture(from, to, 1));
             }
 
-            // --- Captures vers le Sud-Ouest (diagonale gauche pour les noirs) ---
-            // Un pion noir sur sq capture sur sq-9 si sq n'est pas sur la colonne A.
+            // --- Captures toward the South-West (left diagonal for black) ---
+            // A black pawn on sq captures on sq-9 if sq is not on the A file.
             let cap_sw       = ((pawns & !FILE_A) >> 9) & enemy;
             let cap_sw_promo = cap_sw & RANK_1;
             let cap_sw_norm  = cap_sw & !RANK_1;
@@ -532,8 +532,8 @@ fn generate_pawn_captures(board: &Board, color: Color, moves: &mut crate::moves:
                 moves.push(Move::promotion_capture(from, to, 1));
             }
 
-            // --- Prise en passant noire ---
-            // Copie exacte de generate_black_pawn_moves() — même logique bitboard.
+            // --- Black en passant capture ---
+            // Exact copy of generate_black_pawn_moves() — same bitboard logic.
             if let Some(ep_sq) = board.en_passant {
                 let ep_bb: Bitboard = 1u64 << ep_sq;
                 let ep_attackers =
@@ -548,27 +548,27 @@ fn generate_pawn_captures(board: &Board, color: Color, moves: &mut crate::moves:
     }
 }
 
-/// Génère toutes les pseudo-captures pour la couleur ayant le trait.
+/// Generates all pseudo-captures for the color to move.
 ///
-/// Pour chaque type de pièce, on intersecte directement les cases attaquées
-/// avec le bitboard ennemi (`& enemy`). Ceci évite de générer les coups
-/// silencieux et le test `board.all_pieces & (1u64 << to)` de la version complète.
+/// For each piece type, the attacked squares are intersected directly
+/// with the enemy bitboard (`& enemy`). This avoids generating the
+/// silent moves and the `board.all_pieces & (1u64 << to)` test from the full version.
 ///
-/// Le roque est exclu : il ne peut jamais être une capture.
-/// Les promotions silencieuses sont exclues : gérées hors de la quiescence.
+/// Castling is excluded: it can never be a capture.
+/// Silent promotions are excluded: handled outside of quiescence.
 fn generate_pseudo_captures(board: &Board, moves: &mut crate::moves::MoveList) {
     let color    = board.side_to_move;
     let enemy    = board.occupancy[color.opposite().index()];
     let occupied = board.all_pieces;
 
-    // --- Pions ---
+    // --- Pawns ---
     generate_pawn_captures(board, color, moves);
 
-    // --- Cavaliers ---
+    // --- Knights ---
     let mut knights = board.pieces[color.index()][Piece::Knight.index()];
     while knights != 0 {
         let from     = pop_lsb(&mut knights);
-        // Attaques du cavalier intersectées avec les pièces ennemies uniquement
+        // Knight attacks intersected with enemy pieces only
         let mut caps = knight_attacks(from) & enemy;
         while caps != 0 {
             let to = pop_lsb(&mut caps);
@@ -576,7 +576,7 @@ fn generate_pseudo_captures(board: &Board, moves: &mut crate::moves::MoveList) {
         }
     }
 
-    // --- Fous ---
+    // --- Bishops ---
     let mut bishops = board.pieces[color.index()][Piece::Bishop.index()];
     while bishops != 0 {
         let from     = pop_lsb(&mut bishops);
@@ -587,7 +587,7 @@ fn generate_pseudo_captures(board: &Board, moves: &mut crate::moves::MoveList) {
         }
     }
 
-    // --- Tours ---
+    // --- Rooks ---
     let mut rooks = board.pieces[color.index()][Piece::Rook.index()];
     while rooks != 0 {
         let from     = pop_lsb(&mut rooks);
@@ -598,11 +598,11 @@ fn generate_pseudo_captures(board: &Board, moves: &mut crate::moves::MoveList) {
         }
     }
 
-    // --- Dames ---
+    // --- Queens ---
     let mut queens = board.pieces[color.index()][Piece::Queen.index()];
     while queens != 0 {
         let from     = pop_lsb(&mut queens);
-        // La dame combine les attaques de la tour et du fou
+        // The queen combines rook and bishop attacks
         let mut caps = queen_attacks(from, occupied) & enemy;
         while caps != 0 {
             let to = pop_lsb(&mut caps);
@@ -610,8 +610,8 @@ fn generate_pseudo_captures(board: &Board, moves: &mut crate::moves::MoveList) {
         }
     }
 
-    // --- Roi ---
-    // Le roi ne peut pas roquer : le roque n'est jamais une capture.
+    // --- King ---
+    // The king cannot castle: castling is never a capture.
     let king_sq  = board.king_square(color);
     let mut caps = king_attacks(king_sq) & enemy;
     while caps != 0 {
@@ -620,60 +620,60 @@ fn generate_pseudo_captures(board: &Board, moves: &mut crate::moves::MoveList) {
     }
 }
 
-/// Génère tous les coups de capture LÉGAUX (captures, en passant, promotion-captures).
+/// Generates all LEGAL capture moves (captures, en passant, promotion-captures).
 ///
-/// Garantit : aucun coup retourné ne laisse le roi en échec.
+/// Guarantees: no returned move leaves the king in check.
 ///
-/// Complexité vs ancienne implémentation :
-///   Avant : generate_legal_moves() → make/unmake pour ~35 pseudo-coups → filtrer
-///   Après : generate_pseudo_captures() → make/unmake pour ~5 pseudo-captures → résultat
+/// Complexity vs old implementation:
+///   Before: generate_legal_moves() → make/unmake for ~35 pseudo-moves → filter
+///   After: generate_pseudo_captures() → make/unmake for ~5 pseudo-captures → result
 ///
-/// La quiescence représentant 80-90% des nœuds totaux d'une recherche, ce changement
-/// est le plus impactant possible sur les performances du moteur.
+/// Since quiescence represents 80-90% of the total nodes in a search, this change
+/// has the greatest possible impact on the engine's performance.
 pub fn generate_legal_captures(board: &mut Board) -> Vec<Move> {
-    // Wrapper allouant un Vec — conservé pour d'éventuels appelants hors chemin
-    // chaud. Le moteur utilise generate_legal_captures_into() (zéro allocation).
+    // Wrapper allocating a Vec — kept for potential callers outside the hot
+    // path. The engine uses generate_legal_captures_into() (zero allocation).
     let mut list = MoveList::new();
     generate_legal_captures_into(board, &mut list);
     list.to_vec()
 }
 
-/// Version zéro-allocation de generate_legal_captures() : remplit la `MoveList`
-/// fournie (typiquement sur la pile). La liste est vidée au début.
+/// Zero-allocation version of generate_legal_captures(): fills the provided
+/// `MoveList` (typically on the stack). The list is cleared at the start.
 pub fn generate_legal_captures_into(board: &mut Board, out: &mut MoveList) {
     out.clear();
 
-    // Pseudo-captures générées sur la pile.
+    // Pseudo-captures generated on the stack.
     let mut pseudo = MoveList::new();
     generate_pseudo_captures(board, &mut pseudo);
 
-    // Même filtrage légal accéléré que pour les coups complets (chemin rapide
-    // par clouages + make/unmake pour les cas délicats — en passant inclus).
+    // Same accelerated legal filtering as for full moves (fast path
+    // via pinned pieces + make/unmake for tricky cases — en passant included).
     filter_legal_into(board, &pseudo, out);
 }
 
-/// Retourne true si la position est un pat (aucun coup légal, roi non en échec).
+/// Returns true if the position is a stalemate (no legal moves, king not in check).
 pub fn is_stalemate(board: &mut Board) -> bool {
     let moves = generate_legal_moves(board);
     moves.is_empty() && !is_in_check(board, board.side_to_move)
 }
 
-/// Retourne true si la position est un échec et mat.
+/// Returns true if the position is a checkmate.
 pub fn is_checkmate(board: &mut Board) -> bool {
     let moves = generate_legal_moves(board);
     moves.is_empty() && is_in_check(board, board.side_to_move)
 }
 
 // =============================================================================
-// Perft — Test de génération des coups
+// Perft — Move generation test
 //
-// Perft (PERFormance Test) compte le nombre de noeuds feuilles à une profondeur
-// donnée. Les résultats sont connus et peuvent être vérifiés contre des tables
-// de référence pour valider la correction de la génération des coups.
+// Perft (PERFormance Test) counts the number of leaf nodes at a given
+// depth. The results are known and can be verified against reference
+// tables to validate the correctness of move generation.
 // =============================================================================
 
-/// Compte le nombre de positions atteignables à la profondeur `depth`.
-/// Résultats de référence pour la position initiale :
+/// Counts the number of positions reachable at depth `depth`.
+/// Reference results for the initial position:
 ///   depth 1 → 20
 ///   depth 2 → 400
 ///   depth 3 → 8902
@@ -700,7 +700,7 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
     count
 }
 
-/// Version de perft qui affiche le détail par coup (utile pour le débogage).
+/// Version of perft that displays the breakdown per move (useful for debugging).
 pub fn perft_divide(board: &mut Board, depth: u32) -> u64 {
     let moves = generate_legal_moves(board);
     let mut total = 0u64;
@@ -719,24 +719,24 @@ pub fn perft_divide(board: &mut Board, depth: u32) -> u64 {
 }
 
 // =============================================================================
-// Tests Perft — Validation de la génération de coups
+// Perft Tests — Move generation validation
 //
-// Ces tests comparent les résultats de perft() aux valeurs de référence de la
-// Chess Programming Wiki : https://www.chessprogramming.org/Perft_Results
+// These tests compare the results of perft() against the reference values from the
+// Chess Programming Wiki: https://www.chessprogramming.org/Perft_Results
 //
-// Un écart de 1 nœud, même à profondeur 3, révèle un bug précis dans la
-// génération : roque illégal accepté, prise en passant manquée, clouage
-// ignoré, promotion incorrecte, etc.
+// A discrepancy of 1 node, even at depth 3, reveals a specific bug in
+// generation: illegal castling accepted, missed en passant, pin
+// ignored, incorrect promotion, etc.
 //
-// Organisation :
-//   Tests rapides  — profondeur ≤ 3, < 100 000 nœuds → lancés par `cargo test`
-//   Tests lents    — profondeur 4-5, millions de nœuds → #[ignore], lancés avec
-//                    `cargo test -- --include-ignored` ou via `cargo run --bin perft`
+// Organization:
+//   Fast tests  — depth ≤ 3, < 100 000 nodes → run by `cargo test`
+//   Slow tests  — depth 4-5, millions of nodes → #[ignore], run with
+//                    `cargo test -- --include-ignored` or via `cargo run --bin perft`
 //
-// Utilisation recommandée :
-//   1. `cargo test`                               : tests rapides (quelques secondes)
-//   2. `cargo test -- --include-ignored`          : suite complète (quelques minutes debug)
-//   3. `cargo run --release --bin perft`          : suite optimisée (< 30 secondes release)
+// Recommended usage:
+//   1. `cargo test`                               : fast tests (a few seconds)
+//   2. `cargo test -- --include-ignored`          : full suite (a few minutes in debug)
+//   3. `cargo run --release --bin perft`          : optimized suite (< 30 seconds in release)
 // =============================================================================
 
 #[cfg(test)]
@@ -745,10 +745,10 @@ mod tests {
     use crate::board::state::Board;
 
     // =========================================================================
-    // Position 1 — Position initiale
+    // Position 1 — Initial position
     // rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
-    // Source : https://www.chessprogramming.org/Perft_Results
-    // Couvre : cas de base, toutes les pièces normales
+    // Source: https://www.chessprogramming.org/Perft_Results
+    // Covers: basic cases, all normal pieces
     // =========================================================================
 
     #[test]
@@ -787,8 +787,8 @@ mod tests {
     // =========================================================================
     // Position 2 — Kiwipete
     // r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1
-    // Couvre : roques des deux côtés, prises en passant, promotions
-    //          découvertes d'échec, positions complexes
+    // Covers: castling on both sides, en passant captures, promotions
+    //          discovered checks, complex positions
     // =========================================================================
 
     #[test]
@@ -822,9 +822,9 @@ mod tests {
     }
 
     // =========================================================================
-    // Position 3 — Finale avec pions passés
+    // Position 3 — Endgame with passed pawns
     // 8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1
-    // Couvre : prises en passant edge-case, promotions multiples, peu de pièces
+    // Covers: en passant edge cases, multiple promotions, few pieces
     // =========================================================================
 
     #[test]
@@ -865,9 +865,9 @@ mod tests {
     }
 
     // =========================================================================
-    // Position 4 — Promotions et roques minoritaires
+    // Position 4 — Promotions and minority castling
     // r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1
-    // Couvre : promotions de 7 pions blancs en position, roques limités (kq seulement)
+    // Covers: promotions of 7 white pawns in position, limited castling (kq only)
     // =========================================================================
 
     #[test]
@@ -900,9 +900,9 @@ mod tests {
     }
 
     // =========================================================================
-    // Position 5 — En passant et promotions edge-cases
+    // Position 5 — En passant and promotion edge cases
     // rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8
-    // Couvre : prise en passant double, promotions avec capture, roi sans roque
+    // Covers: double en passant capture, promotions with capture, king without castling
     // =========================================================================
 
     #[test]
@@ -936,9 +936,9 @@ mod tests {
     }
 
     // =========================================================================
-    // Position 6 — Milieu de partie équilibré
+    // Position 6 — Balanced middlegame
     // r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10
-    // Couvre : positions ouvertes, fous en fianchetto, pas de roque disponible
+    // Covers: open positions, fianchettoed bishops, no castling available
     // =========================================================================
 
     #[test]
@@ -972,12 +972,12 @@ mod tests {
     }
 
     // =========================================================================
-    // Tests de légalité générale
+    // General legality tests
     // =========================================================================
 
     #[test]
     fn aucun_coup_legal_ne_laisse_le_roi_en_echec() {
-        // Vérifier qu'aucun coup légal ne laisse le roi en échec — position initiale.
+        // Verify that no legal move leaves the king in check — initial position.
         let mut board = Board::start_position();
         let legal_moves = generate_legal_moves(&mut board);
         for mv in legal_moves {
@@ -990,7 +990,7 @@ mod tests {
 
     #[test]
     fn aucun_coup_legal_ne_laisse_le_roi_en_echec_kiwipete() {
-        // Même vérification sur Kiwipete (plus de cas spéciaux).
+        // Same verification on Kiwipete (more special cases).
         let fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
         let mut board = Board::from_fen(fen).unwrap();
         let legal_moves = generate_legal_moves(&mut board);

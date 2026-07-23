@@ -1,26 +1,26 @@
 // =============================================================================
 // Vendetta Chess Motor — src/bin/benchmark.rs
 //
-// Rôle : Mesurer les performances réelles du moteur en conditions de jeu.
+// Role: Measure the engine's real performance in game conditions.
 //
-// Ce benchmark est différent de perft :
-//   - perft    mesure la CORRECTION  (bon nombre de coups générés ?)
-//   - benchmark mesure la PERFORMANCE (combien de nœuds alpha-bêta par seconde ?)
+// This benchmark is different from perft:
+//   - perft    measures CORRECTNESS  (correct number of moves generated?)
+//   - benchmark measures PERFORMANCE (how many alpha-beta nodes per second?)
 //
-// Ce que mesure ce benchmark :
-//   1. NPS (nœuds par seconde) en recherche alpha-bêta réelle
-//   2. Scalabilité Lazy SMP : gain sur 1, 2, 4, 8, N cœurs
-//   3. Profondeur atteinte en 3 secondes sur des positions types
+// What this benchmark measures:
+//   1. NPS (nodes per second) in real alpha-beta search
+//   2. Lazy SMP scalability: gain on 1, 2, 4, 8, N cores
+//   3. Depth reached in 3 seconds on typical positions
 //
-// Utilisation :
+// Usage:
 //   cargo run --release --bin benchmark
-//   cargo run --release --bin benchmark -- --time 5000    # 5 secondes par test
-//   cargo run --release --bin benchmark -- --threads 4    # forcer 4 threads max
+//   cargo run --release --bin benchmark -- --time 5000    # 5 seconds per test
+//   cargo run --release --bin benchmark -- --threads 4    # force 4 threads max
 //
-// Interprétation :
-//   - NPS croissant avec les threads → Lazy SMP scale bien
-//   - Plateau rapide → contention sur la table de transposition
-//   - Gain ×3-5 sur 12 cœurs est normal et sain pour Lazy SMP
+// Interpretation:
+//   - NPS increasing with threads → Lazy SMP scales well
+//   - Rapid plateau → contention on the transposition table
+//   - ×3-5 gain on 12 cores is normal and healthy for Lazy SMP
 // =============================================================================
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
@@ -37,7 +37,7 @@ use vendetta_chess_motor::search::SearchInfo;
 use vendetta_chess_motor::utils::types::{Move, SCORE_MATE};
 
 // =============================================================================
-// Positions de benchmark
+// Benchmark positions
 // =============================================================================
 
 struct BenchPosition {
@@ -45,8 +45,8 @@ struct BenchPosition {
     fen:  &'static str,
 }
 
-/// Positions couvrant les 3 phases de la partie.
-/// Choisies pour leur richesse tactique et leur représentativité.
+/// Positions covering the 3 phases of the game.
+/// Chosen for their tactical richness and representativeness.
 static POSITIONS: &[BenchPosition] = &[
     BenchPosition {
         name: "Ouverture — Position initiale",
@@ -71,10 +71,10 @@ static POSITIONS: &[BenchPosition] = &[
 ];
 
 // =============================================================================
-// Moteur de mesure
+// Measurement engine
 // =============================================================================
 
-/// Résultat d'une mesure sur un nombre de threads donné.
+/// Result of a measurement on a given number of threads.
 struct ThreadResult {
     threads:   usize,
     nodes:     u64,
@@ -83,14 +83,14 @@ struct ThreadResult {
     depth:     i32,
 }
 
-/// Lance une recherche alpha-bêta pendant `duration` sur `num_threads` threads.
-/// Retourne le total de nœuds explorés (somme de tous les threads).
+/// Runs an alpha-beta search for `duration` on `num_threads` threads.
+/// Returns the total number of nodes explored (sum of all threads).
 fn run_search(board: &Board, num_threads: usize, duration: Duration) -> ThreadResult {
-    let tt        = Arc::new(TranspositionTable::new(64)); // 64 Mo TT
+    let tt        = Arc::new(TranspositionTable::new(64)); // 64 MB TT
     let stop_flag = Arc::new(AtomicBool::new(false));
     let t0        = Instant::now();
 
-    // --- Threads secondaires (Lazy SMP) ---
+    // --- Secondary threads (Lazy SMP) ---
     let mut handles = vec![];
 
     for t in 1..num_threads {
@@ -124,7 +124,7 @@ fn run_search(board: &Board, num_threads: usize, duration: Duration) -> ThreadRe
         handles.push(handle);
     }
 
-    // --- Thread principal ---
+    // --- Main thread ---
     let mut board_main = board.clone();
     let tt_main        = Arc::clone(&tt);
     let stop_main      = Arc::clone(&stop_flag);
@@ -147,17 +147,17 @@ fn run_search(board: &Board, num_threads: usize, duration: Duration) -> ThreadRe
         if !info.should_stop() {
             best_depth = depth;
         }
-        // Vérifier manuellement le temps (check_time ne suffit pas pour une durée exacte)
+        // Manually check the time (check_time is not enough for an exact duration)
         if t0.elapsed() >= duration {
             stop_flag.store(true, Ordering::Relaxed);
             break;
         }
     }
 
-    // Arrêt des threads secondaires
+    // Stop the secondary threads
     stop_flag.store(true, Ordering::Relaxed);
 
-    // Collecter les nœuds des threads secondaires
+    // Collect the nodes from the secondary threads
     let mut total_nodes = info.nodes;
     for h in handles {
         total_nodes += h.join().unwrap_or(0);
@@ -176,7 +176,7 @@ fn run_search(board: &Board, num_threads: usize, duration: Duration) -> ThreadRe
 }
 
 // =============================================================================
-// Utilitaires d'affichage
+// Display utilities
 // =============================================================================
 
 fn fmt_num(n: u64) -> String {
@@ -200,13 +200,13 @@ fn bar(ratio: f64, width: usize) -> String {
 }
 
 // =============================================================================
-// Point d'entrée
+// Entry point
 // =============================================================================
 
 fn main() {
-    // --- Parsing des arguments ---
+    // --- Parsing arguments ---
     let args: Vec<String> = std::env::args().collect();
-    let mut duration_ms  = 3_000u64; // 3 secondes par défaut
+    let mut duration_ms  = 3_000u64; // 3 seconds by default
     let mut max_threads  = std::thread::available_parallelism()
         .map(|n| n.get()).unwrap_or(1);
 
@@ -230,13 +230,13 @@ fn main() {
         i += 1;
     }
 
-    // Initialiser les tables d'attaque (magic bitboards)
+    // Initialize the attack tables (magic bitboards)
     init_attack_tables();
 
     let duration    = Duration::from_millis(duration_ms);
     let cpu_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
 
-    // Paliers de threads à tester
+    // Thread tiers to test
     let thread_counts: Vec<usize> = {
         let mut counts = vec![1usize];
         let mut t = 2;
@@ -250,7 +250,7 @@ fn main() {
         counts
     };
 
-    // En-tête
+    // Header
     println!();
     println!("╔══════════════════════════════════════════════════════════════════════════╗");
     println!("║         Vendetta Chess Motor — Benchmark de performance                        ║");
@@ -266,7 +266,7 @@ fn main() {
     let mut grand_total_nps_max = 0u64;
     let mut pos_count           = 0usize;
 
-    // --- Boucle sur les positions ---
+    // --- Loop over positions ---
     for pos in POSITIONS {
         let board = match Board::from_fen(pos.fen) {
             Ok(b)  => b,
@@ -280,7 +280,7 @@ fn main() {
 
         let mut results: Vec<ThreadResult> = Vec::new();
 
-        // Mesure pour chaque palier de threads
+        // Measurement for each thread tier
         for &n in &thread_counts {
             let r = run_search(&board, n, duration);
             print!(
@@ -296,7 +296,7 @@ fn main() {
             println!();
         }
 
-        // Scalabilité : ratio par rapport au mono-thread
+        // Scalability: ratio relative to single-thread
         if results.len() > 1 {
             let nps_1t = results[0].nps.max(1);
             println!();
@@ -321,7 +321,7 @@ fn main() {
         println!();
     }
 
-    // --- Résumé global ---
+    // --- Overall summary ---
     separator();
     println!();
     println!("  Résumé global ({} positions) :", pos_count);
@@ -336,7 +336,7 @@ fn main() {
         println!("    Gain Lazy SMP        : ×{:.2}  ({} → {} cœurs)", gain, 1, max_threads);
         println!();
 
-        // Verdict sur la scalabilité
+        // Verdict on scalability
         if gain >= 4.0 {
             println!("  ✓ Excellent — Lazy SMP scale très bien sur ce matériel.");
         } else if gain >= 2.5 {

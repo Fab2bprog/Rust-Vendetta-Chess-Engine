@@ -1,47 +1,47 @@
 // =============================================================================
 // Vendetta Chess Motor — src/bin/tuner.rs
 //
-// Rôle : Texel Tuning — calibre automatiquement un sous-ensemble des
-//        constantes d'évaluation sur le fichier de positions produit par
-//        extract_positions.rs (FEN;résultat, un par ligne).
+// Role: Texel Tuning — automatically calibrates a subset of the
+//        evaluation constants on the positions file produced by
+//        extract_positions.rs (FEN;result, one per line).
 //
-// Portée de cette première version (v1) :
-//   Paramètres ajustés : valeurs des pièces (Cavalier, Fou, Tour, Dame —
-//   le Pion reste fixé à 100 comme ancre d'échelle, convention standard du
-//   Texel Tuning) + pénalités pions doublés/isolés + bonus pions passés
-//   (6 paliers d'avancement).  Soit 12 paramètres.
+// Scope of this first version (v1):
+//   Tuned parameters: piece values (Knight, Bishop, Rook, Queen —
+//   the Pawn stays fixed at 100 as the scale anchor, standard convention of
+//   Texel Tuning) + doubled/isolated pawn penalties + passed pawn bonuses
+//   (6 advancement tiers). That's 12 parameters.
 //
-//   Volontairement NON inclus dans cette v1 : les tables de position (PST,
-//   384 valeurs) et les autres critères (mobilité, centre, roi, finales).
-//   Raison : valider d'abord que tout le pipeline fonctionne correctement
-//   sur un jeu de paramètres restreint avant d'étendre la portée — chaque
-//   paramètre supplémentaire multiplie le temps de calcul d'une passe.
+//   Deliberately NOT included in this v1: the piece-square tables (PST,
+//   384 values) and the other criteria (mobility, center, king, endgames).
+//   Reason: first validate that the whole pipeline works correctly
+//   on a restricted set of parameters before extending the scope — each
+//   additional parameter multiplies the computation time of a pass.
 //
-// Pourquoi une évaluation séparée de eval::evaluate() :
-//   Le moteur réel maintient le matériel et les PST de façon INCRÉMENTALE
-//   (board.eval_mg / board.eval_eg, mis à jour à chaque place_piece /
-//   remove_piece) pour la performance en recherche. Cette optimisation est
-//   incompatible avec le tuning, qui doit pouvoir recalculer le score d'une
-//   position pour des MILLIERS de jeux de paramètres candidats différents.
-//   tunable_eval() ci-dessous recalcule donc le matériel et la structure de
-//   pions DIRECTEMENT depuis les bitboards à chaque appel — plus lent que
-//   le moteur réel, mais sans incidence : le tuning est un calcul hors-ligne,
-//   pas une recherche en temps limité. Le moteur de production n'est pas
-//   touché par ce fichier.
+// Why a separate evaluation from eval::evaluate():
+//   The real engine maintains material and PST INCREMENTALLY
+//   (board.eval_mg / board.eval_eg, updated on every place_piece /
+//   remove_piece) for search performance. This optimization is
+//   incompatible with tuning, which must be able to recompute the score of a
+//   position for THOUSANDS of different candidate parameter sets.
+//   tunable_eval() below therefore recomputes material and pawn structure
+//   DIRECTLY from the bitboards on every call — slower than
+//   the real engine, but with no impact: tuning is an offline computation,
+//   not a time-limited search. The production engine is not
+//   affected by this file.
 //
-// Algorithme (Texel's Tuning Method — recherche locale par coordonnée) :
-//   1. Charger toutes les positions (FEN + résultat) en mémoire.
-//   2. Calculer l'erreur totale (MSE entre sigmoïde(eval) et résultat réel)
-//      avec les paramètres de départ (valeurs actuelles du moteur).
-//   3. Pour chaque paramètre, tour à tour : essayer +1, recalculer l'erreur
-//      sur tout le jeu de données ; si meilleure, garder et continuer dans
-//      ce sens ; sinon essayer -1 ; sinon laisser ce paramètre inchangé.
-//   4. Répéter tous les paramètres jusqu'à ce qu'une passe complète n'améliore
-//      plus rien (convergence).
-//   5. Afficher les nouvelles valeurs — c'est à reporter manuellement dans
-//      le code de production (material.rs, pawns.rs) après vérification.
+// Algorithm (Texel's Tuning Method — local search by coordinate):
+//   1. Load all positions (FEN + result) into memory.
+//   2. Compute the total error (MSE between sigmoid(eval) and the actual result)
+//      with the starting parameters (current engine values).
+//   3. For each parameter, in turn: try +1, recompute the error
+//      over the whole dataset; if better, keep it and continue in
+//      that direction; otherwise try -1; otherwise leave this parameter unchanged.
+//   4. Repeat over all parameters until a full pass no longer improves
+//      anything (convergence).
+//   5. Print the new values — this must be manually carried over into
+//      the production code (material.rs, pawns.rs) after verification.
 //
-// Utilisation :
+// Usage:
 //   cargo run --release --bin tuner -- positions.txt
 // =============================================================================
 
@@ -62,83 +62,83 @@ use vendetta_chess_motor::eval::tables::{
 };
 
 // =============================================================================
-// Paramètres ajustables
+// Tunable parameters
 // =============================================================================
 //
-// v2 — Extension du modèle v1 (matériel + structure de pions, 12 paramètres).
+// v2 — Extension of the v1 model (material + pawn structure, 12 parameters).
 //
-// Pourquoi cette extension était nécessaire :
-//   Le tuning v1 a convergé vers une solution dégénérée — toutes les valeurs
-//   de pièces divisées par ~2, et des bonus de pions passés NÉGATIFS aux
-//   premiers rangs (chose impossible aux échecs : un pion passé n'est jamais
-//   une faiblesse). Cause : le modèle v1 était trop pauvre pour expliquer la
-//   variance des résultats réels (gaffes, pression du temps, tactiques que
-//   le modèle ne voit pas) — l'optimiseur a "triché" en aplatissant tous les
-//   poids vers zéro, ce qui réduit l'erreur quadratique sur un signal bruité
-//   sans avoir aucun rapport avec la qualité réelle des positions.
+// Why this extension was necessary:
+//   The v1 tuning converged to a degenerate solution — all the
+//   piece values divided by ~2, and NEGATIVE passed pawn bonuses on the
+//   early ranks (impossible in chess: a passed pawn is never
+//   a weakness). Cause: the v1 model was too poor to explain the
+//   variance of actual results (blunders, time pressure, tactics that
+//   the model doesn't see) — the optimizer "cheated" by flattening all
+//   weights toward zero, which reduces the squared error on a noisy signal
+//   without having any relation to the actual quality of the positions.
 //
-//   v2 ajoute 10 paramètres (mobilité ×4, sécurité du roi ×3, centre ×2,
-//   paire de fous ×1) pour donner au modèle assez d'expressivité — il peut
-//   désormais expliquer une partie de la variance par autre chose que le
-//   matériel brut, ce qui devrait éliminer l'incitation à aplatir l'échelle.
+//   v2 adds 10 parameters (mobility ×4, king safety ×3, center ×2,
+//   bishop pair ×1) to give the model enough expressiveness — it can
+//   now explain part of the variance by something other than raw
+//   material, which should remove the incentive to flatten the scale.
 //
-//   Simplification volontaire conservée : contrairement à evaluate(), ces
-//   critères ne sont PAS désactivés en finale (pas de détection de phase
-//   portée dans le tuner pour l'instant) — ils s'appliquent à toutes les
-//   positions échantillonnées, milieu de partie et finale confondus.
+//   Deliberate simplification kept: unlike evaluate(), these
+//   criteria are NOT disabled in the endgame (no phase detection
+//   implemented in the tuner for now) — they apply to all
+//   sampled positions, middlegame and endgame alike.
 //
-// v4 — Ajout des tables de position (PST), Pion/Cavalier/Fou/Tour/Dame
-//   uniquement (5 × 64 = 320 nouveaux paramètres, total 342).
+// v4 — Addition of the piece-square tables (PST), Pawn/Knight/Bishop/Rook/Queen
+//   only (5 × 64 = 320 new parameters, total 342).
 //
-//   Choix délibéré d'EXCLURE le Roi de cette extension (décidé explicitement
-//   avec l'utilisateur avant d'écrire ce code) : en production, le Roi a
-//   DEUX tables distinctes (KING_MIDDLEGAME_TABLE : rester protégé,
-//   KING_ENDGAME_TABLE : centraliser) sélectionnées par la phase de la
-//   partie. Ce tuner n'a toujours pas de détection de phase (voir note v2
-//   ci-dessus) — il ne calcule qu'UN SEUL score par position, pas un mélange
-//   MG/EG pondéré. Tuner une seule table de Roi reviendrait soit à l'appliquer
-//   aux deux tables de production (perdant la distinction abri/centralisation
-//   qui fait justement l'intérêt de ce découpage), soit à devoir ajouter la
-//   détection de phase au tuner — un chantier à part, plus risqué pour la
-//   convergence, réservé à une v5 éventuelle.
+//   Deliberate choice to EXCLUDE the King from this extension (decided explicitly
+//   with the user before writing this code): in production, the King has
+//   TWO distinct tables (KING_MIDDLEGAME_TABLE: stay protected,
+//   KING_ENDGAME_TABLE: centralize) selected by the phase of the
+//   game. This tuner still has no phase detection (see the v2 note
+//   above) — it computes only ONE score per position, not a weighted
+//   MG/EG blend. Tuning a single King table would amount to either applying it
+//   to both production tables (losing the shelter/centralization distinction
+//   that is precisely the point of this split), or to having to add
+//   phase detection to the tuner — a separate undertaking, riskier for
+//   convergence, reserved for a possible v5.
 //
-//   Pour les 5 pièces tunées ici, ce choix ne pose AUCUN problème de fidélité :
-//   en production, ces 5 pièces utilisent déjà UNE SEULE table pour MG et EG
-//   (voir eval/tables.rs::piece_square_values — seul le Roi a deux tables).
-//   Le modèle simplifié du tuner est donc une représentation EXACTE de la
-//   structure PST de production pour ces 5 pièces, pas une approximation.
+//   For the 5 pieces tuned here, this choice poses NO fidelity problem:
+//   in production, these 5 pieces already use A SINGLE table for MG and EG
+//   (see eval/tables.rs::piece_square_values — only the King has two tables).
+//   The tuner's simplified model is therefore an EXACT representation of the
+//   production PST structure for these 5 pieces, not an approximation.
 //
-//   Valeurs de départ importées DIRECTEMENT depuis eval::tables (pas de
-//   copie-collé manuel des constantes — élimine tout risque de désynchro-
-//   nisation entre le tuner et la production).
+//   Starting values imported DIRECTLY from eval::tables (no
+//   manual copy-paste of the constants — eliminates any risk of desyn-
+//   chronization between the tuner and production).
 //
-//   Coût : 342 paramètres contre 22 en v3, soit ~15,5× plus d'essais par
-//   passe de coordinate descent. Le temps total de convergence sera
-//   nettement plus long qu'en v3 (probablement des dizaines de minutes à
-//   quelques heures selon le nombre de passes nécessaires) — à constater
-//   empiriquement plutôt qu'à promettre un chiffre précis ici.
+//   Cost: 342 parameters versus 22 in v3, i.e. ~15.5× more trials per
+//   coordinate descent pass. The total convergence time will be
+//   noticeably longer than in v3 (probably tens of minutes to
+//   a few hours depending on the number of passes required) — to be observed
+//   empirically rather than promising a precise figure here.
 
-/// Nombre de paramètres scalaires (matériel, structure de pions, mobilité,
-/// sécurité du roi, centre — hérités de v1/v2/v3). Les tables PST (v4)
-/// commencent à cet index.
+/// Number of scalar parameters (material, pawn structure, mobility,
+/// king safety, center — inherited from v1/v2/v3). The PST tables (v4)
+/// start at this index.
 const NUM_SCALAR_PARAMS: usize = 22;
 
-/// Index de base de chacune des 5 tables PST tunées, 64 valeurs chacune.
-/// Convention IDENTIQUE à eval/tables.rs : case a1 = index 0 du point de
-/// vue Blanc, mirror_square() pour les Noirs.
+/// Base index of each of the 5 tuned PST tables, 64 values each.
+/// Convention IDENTICAL to eval/tables.rs: square a1 = index 0 from White's
+/// point of view, mirror_square() for Black.
 const IDX_PST_PAWN_BASE:   usize = NUM_SCALAR_PARAMS;             // 22
 const IDX_PST_KNIGHT_BASE: usize = IDX_PST_PAWN_BASE   + 64;      // 86
 const IDX_PST_BISHOP_BASE: usize = IDX_PST_KNIGHT_BASE + 64;      // 150
 const IDX_PST_ROOK_BASE:   usize = IDX_PST_BISHOP_BASE + 64;      // 214
 const IDX_PST_QUEEN_BASE:  usize = IDX_PST_ROOK_BASE   + 64;      // 278
 
-/// Nombre total de paramètres ajustables (22 scalaires + 320 PST = 342).
+/// Total number of tunable parameters (22 scalars + 320 PST = 342).
 const NUM_PARAMS: usize = IDX_PST_QUEEN_BASE + 64;
 
-/// Noms des paramètres SCALAIRES uniquement (indices 0..NUM_SCALAR_PARAMS),
-/// dans le même ordre que les index ci-dessous — pour l'affichage périodique
-/// et final. Les 320 paramètres PST (v4) ont leur propre fonction d'affichage
-/// dédiée (print_pst_table()) — un nom par case serait illisible ici.
+/// Names of the SCALAR parameters only (indices 0..NUM_SCALAR_PARAMS),
+/// in the same order as the indices below — for periodic and
+/// final display. The 320 PST parameters (v4) have their own dedicated
+/// display function (print_pst_table()) — a name per square would be unreadable here.
 const PARAM_NAMES: [&str; NUM_SCALAR_PARAMS] = [
     "knight", "bishop", "rook", "queen",
     "doubled_pawn_penalty", "isolated_pawn_penalty",
@@ -157,7 +157,7 @@ const IDX_ROOK:   usize = 2;
 const IDX_QUEEN:  usize = 3;
 const IDX_DOUBLED:  usize = 4;
 const IDX_ISOLATED: usize = 5;
-const IDX_PASSED_BASE: usize = 6; // occupe les index 6 à 11 (rangs 2 à 7)
+const IDX_PASSED_BASE: usize = 6; // occupies indices 6 to 11 (ranks 2 to 7)
 const IDX_BISHOP_PAIR: usize = 12;
 const IDX_KNIGHT_MOB: usize = 13;
 const IDX_BISHOP_MOB: usize = 14;
@@ -169,30 +169,30 @@ const IDX_OPEN_FILE_KING_PEN: usize = 19;
 const IDX_CENTER_PAWN:  usize = 20;
 const IDX_CENTER_ATTACK: usize = 21;
 
-/// Paramètres ajustables, représentés comme un simple tableau de i32.
-/// Choix volontaire (plutôt qu'une struct à champs nommés avec des
-/// références mutables) : un tableau plat évite toute construction
-/// d'emprunts imbriqués dans la boucle de coordinate descent — plus simple
-/// à relire et à garantir correct sans pouvoir compiler pour vérifier ici.
+/// Tunable parameters, represented as a simple array of i32.
+/// Deliberate choice (rather than a struct with named fields and
+/// mutable references): a flat array avoids any construction
+/// of nested borrows in the coordinate descent loop — simpler
+/// to review and guarantee correct without being able to compile to check here.
 #[derive(Clone, Debug)]
 struct EvalParams {
     values: [i32; NUM_PARAMS],
 }
 
 impl EvalParams {
-    /// Valeurs de départ = constantes actuelles du moteur de production.
-    /// Scalaires : material.rs, pawns.rs, mobility.rs, king_safety.rs, center.rs.
-    /// PST (v4) : importées DIRECTEMENT depuis eval::tables (voir note d'en-tête
-    /// v4) — pas de copie-collé manuel, donc pas de risque de désynchronisation
-    /// entre les valeurs de départ du tuner et la production.
+    /// Starting values = current constants of the production engine.
+    /// Scalars: material.rs, pawns.rs, mobility.rs, king_safety.rs, center.rs.
+    /// PST (v4): imported DIRECTLY from eval::tables (see the v4 header note
+    /// above) — no manual copy-paste, therefore no risk of desynchronization
+    /// between the tuner's starting values and production.
     fn default_from_engine() -> Self {
-        // [0i32; NUM_PARAMS] : tableau plat, rempli par tranches ci-dessous.
+        // [0i32; NUM_PARAMS]: flat array, filled in slices below.
         let mut values = [0i32; NUM_PARAMS];
 
         let scalars: [i32; NUM_SCALAR_PARAMS] = [
             320, 330, 500, 900,     // knight, bishop, rook, queen
             -20, -20,                // doubled, isolated
-            5, 10, 20, 35, 60, 100,  // passed[rang2..rang7]
+            5, 10, 20, 35, 60, 100,  // passed[rank2..rank7]
             30,                      // bishop_pair_bonus
             4, 3, 2, 1,              // knight/bishop/rook/queen mobility
             10, -30, -15,            // shield_pawn, king_center_pen, open_file_pen
@@ -209,10 +209,10 @@ impl EvalParams {
         EvalParams { values }
     }
 
-    /// Valeur PST de `params` pour la table de base `base`, case `sq`
-    /// (déjà retournée du point de vue de la couleur par l'appelant — voir
-    /// pst_score() qui applique mirror_square() pour les Noirs avant d'appeler
-    /// cette fonction).
+    /// PST value from `params` for base table `base`, square `sq`
+    /// (already returned from the color's point of view by the caller — see
+    /// pst_score() which applies mirror_square() for Black before calling
+    /// this function).
     #[inline]
     fn pst(&self, base: usize, sq: u8) -> i32 {
         self.values[base + sq as usize]
@@ -230,7 +230,7 @@ impl EvalParams {
     fn doubled_pawn_penalty(&self)  -> i32 { self.values[IDX_DOUBLED] }
     #[inline]
     fn isolated_pawn_penalty(&self) -> i32 { self.values[IDX_ISOLATED] }
-    /// `advancement` : 1 (rang 2) à 6 (rang 7).
+    /// `advancement`: 1 (rank 2) to 6 (rank 7).
     #[inline]
     fn passed_pawn_bonus(&self, advancement: i32) -> i32 {
         self.values[IDX_PASSED_BASE + (advancement - 1) as usize]
@@ -258,10 +258,10 @@ impl EvalParams {
 }
 
 // =============================================================================
-// Évaluation tunable (matériel + structure de pions uniquement, voir en-tête)
+// Tunable evaluation (material + pawn structure only, see header)
 // =============================================================================
 
-const PAWN_VALUE: i32 = 100; // ancre fixe, convention Texel Tuning standard
+const PAWN_VALUE: i32 = 100; // fixed anchor, standard Texel Tuning convention
 
 fn piece_value(params: &EvalParams, piece: Piece) -> i32 {
     match piece {
@@ -283,10 +283,10 @@ fn material_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     score
 }
 
-/// Structure de pions : doublés, isolés, passés — logique identique à
-/// pawns.rs, mais avec les pénalités/bonus tirés de `params` au lieu des
-/// constantes figées (et table de pion passé précalculée à chaque appel,
-/// ici sans la table OnceLock de pawns.rs — acceptable car non chaud).
+/// Pawn structure: doubled, isolated, passed — logic identical to
+/// pawns.rs, but with the penalties/bonuses drawn from `params` instead of the
+/// fixed constants (and the passed pawn table precomputed on every call,
+/// here without the OnceLock table from pawns.rs — acceptable since not hot).
 fn pawn_structure_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     let pawns       = board.pieces[color.index()][Piece::Pawn.index()];
     let enemy_pawns = board.pieces[color.opposite().index()][Piece::Pawn.index()];
@@ -335,7 +335,7 @@ fn pawn_structure_score(params: &EvalParams, board: &Board, color: Color) -> i32
                     Color::White => rank as i32,
                     Color::Black => 7 - rank as i32,
                 };
-                // advancement: 0=rang1(promu, n'arrive jamais), 1=rang2, ... 6=rang7, 7=rang8
+                // advancement: 0=rank1(promoted, never happens), 1=rank2, ... 6=rank7, 7=rank8
                 if (1..=6).contains(&advancement) {
                     score += params.passed_pawn_bonus(advancement);
                 }
@@ -346,14 +346,14 @@ fn pawn_structure_score(params: &EvalParams, board: &Board, color: Color) -> i32
     score
 }
 
-/// Tables de position (PST) — Pion/Cavalier/Fou/Tour/Dame uniquement (voir
-/// note v4 en en-tête : le Roi est exclu, ses deux tables MG/EG de production
-/// ne peuvent pas être représentées fidèlement par ce tuner sans détection
-/// de phase).
+/// Piece-square tables (PST) — Pawn/Knight/Bishop/Rook/Queen only (see
+/// v4 note in the header: the King is excluded, its two production MG/EG
+/// tables cannot be faithfully represented by this tuner without phase
+/// detection).
 ///
-/// Convention IDENTIQUE à eval/tables.rs::piece_square_values() : la case
-/// est lue directement pour les Blancs, via mirror_square() pour les Noirs —
-/// les tables tunées sont donc, comme en production, "du point de vue Blanc".
+/// Convention IDENTICAL to eval/tables.rs::piece_square_values(): the square
+/// is read directly for White, via mirror_square() for Black —
+/// the tuned tables are therefore, as in production, "from White's point of view".
 fn pst_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     let mut score = 0i32;
 
@@ -399,14 +399,14 @@ fn pst_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     score
 }
 
-/// Bonus de paire de fous — logique identique à material::bishop_pair_score().
+/// Bishop pair bonus — logic identical to material::bishop_pair_score().
 fn bishop_pair_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     let count = board.pieces[color.index()][Piece::Bishop.index()].count_ones();
     if count >= 2 { params.bishop_pair_bonus() } else { 0 }
 }
 
-/// Mobilité des cavaliers/fous/tours/dames — logique identique à
-/// mobility::mobility_score(), bonus tirés de `params` au lieu des constantes.
+/// Mobility of knights/bishops/rooks/queens — logic identical to
+/// mobility::mobility_score(), bonuses drawn from `params` instead of constants.
 fn mobility_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     let own_pieces = board.occupancy[color.index()];
     let occupied   = board.all_pieces;
@@ -447,9 +447,9 @@ fn mobility_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     score
 }
 
-/// Sécurité du roi — logique identique à king_safety::king_safety_score(),
-/// SANS désactivation en finale (le tuner n'a pas de détection de phase —
-/// voir note en en-tête du fichier).
+/// King safety — logic identical to king_safety::king_safety_score(),
+/// WITHOUT disabling in the endgame (the tuner has no phase detection —
+/// see the note in the file header).
 fn king_safety_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     let mut score  = 0i32;
     let king_sq    = board.king_square(color);
@@ -478,10 +478,10 @@ fn king_safety_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     score
 }
 
-/// Contrôle du centre (pions + pièces) — logique identique à center.rs,
-/// fusionné en une seule fonction ici (pas besoin de séparer pour la mobilité
-/// comme dans le moteur de production, le tuner n'a pas ce souci de partage
-/// de calcul d'attaque).
+/// Center control (pawns + pieces) — logic identical to center.rs,
+/// merged into a single function here (no need to separate it for mobility
+/// as in the production engine, the tuner does not have this attack
+/// computation sharing concern).
 fn center_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     const CENTER_SQUARES: u64 = (1u64 << 27) | (1u64 << 28) | (1u64 << 35) | (1u64 << 36);
     let occupied = board.all_pieces;
@@ -528,10 +528,10 @@ fn center_score(params: &EvalParams, board: &Board, color: Color) -> i32 {
     score
 }
 
-/// Score total (matériel + structure de pions + mobilité + sécurité du roi +
-/// centre + paire de fous), point de vue Blancs.
-/// Toujours plus simple que evaluate() (pas de PST, pas de finale dédiée,
-/// pas de phase) — voir portée v2 en en-tête du fichier.
+/// Total score (material + pawn structure + mobility + king safety +
+/// center + bishop pair), from White's point of view.
+/// Always simpler than evaluate() (no PST, no dedicated endgame,
+/// no phase) — see v2 scope in the file header.
 fn tunable_eval_white_pov(params: &EvalParams, board: &Board) -> i32 {
     let mut white = 0i32;
     let mut black = 0i32;
@@ -552,41 +552,41 @@ fn tunable_eval_white_pov(params: &EvalParams, board: &Board) -> i32 {
 }
 
 // =============================================================================
-// Fonction d'erreur (Texel Tuning)
+// Error function (Texel Tuning)
 // =============================================================================
 
-/// Échelle de la sigmoïde — calibrée sur LES DONNÉES (voir calibrate_k() plus
-/// bas) plutôt que figée à la valeur "historique" de 400.
+/// Sigmoid scale — calibrated on THE DATA (see calibrate_k() further
+/// down) rather than fixed to the "historical" value of 400.
 ///
-/// Pourquoi c'est indispensable et pas un simple détail :
-///   Les tunings v1 et v2 ont tous les deux convergé vers un effondrement
-///   d'échelle (matériel divisé par ~2) ET un signe incohérent sur les bonus
-///   de pions passés aux premiers rangs. La cause de l'effondrement : K=400
-///   n'avait jamais été calibré pour CE modèle et CES données précises — la
-///   méthode Texel originale calibre K en premier (recherche 1D sur les
-///   valeurs de départ), AVANT de toucher aux poids d'évaluation, précisément
-///   pour éviter que l'optimiseur ne compense un mauvais calibrage d'échelle
-///   en rétrécissant tous les autres paramètres. C'est l'étape qui manquait.
+/// Why this is essential and not a minor detail:
+///   The v1 and v2 tunings both converged toward a scale
+///   collapse (material divided by ~2) AND an inconsistent sign on the
+///   passed pawn bonuses on the early ranks. The cause of the collapse: K=400
+///   had never been calibrated for THIS model and THIS exact data — the
+///   original Texel method calibrates K first (1D search on the
+///   starting values), BEFORE touching the evaluation weights, precisely
+///   to prevent the optimizer from compensating for a bad scale calibration
+///   by shrinking all the other parameters. This was the missing step.
 #[inline]
 fn sigmoid(score: i32, k: f64) -> f64 {
     1.0 / (1.0 + 10f64.powf(-(score as f64) / k))
 }
 
-/// Position pré-chargée : plateau déjà parsé + résultat réel de la partie
-/// (point de vue Blancs : 1.0, 0.5 ou 0.0).
+/// Pre-loaded position: board already parsed + actual game result
+/// (from White's point of view: 1.0, 0.5 or 0.0).
 struct Sample {
     board:  Board,
     result: f64,
 }
 
-/// Calcule l'erreur quadratique moyenne sur tout le jeu de données pour un
-/// jeu de paramètres donné. C'est la fonction appelée à CHAQUE essai de
-/// valeur candidate dans la boucle de coordinate descent — son coût domine
-/// le temps total du tuning.
+/// Computes the mean squared error over the whole dataset for a
+/// given set of parameters. This is the function called on EVERY candidate
+/// value trial in the coordinate descent loop — its cost dominates
+/// the total tuning time.
 ///
-/// Version séquentielle — conservée pour les petits jeux de données ou le
-/// cas num_threads == 1. La version utilisée par défaut est total_error()
-/// ci-dessous (parallèle).
+/// Sequential version — kept for small datasets or the
+/// num_threads == 1 case. The version used by default is total_error()
+/// below (parallel).
 fn total_error_sequential(params: &EvalParams, samples: &[Sample], k: f64) -> f64 {
     let mut sum = 0.0f64;
     for s in samples {
@@ -598,23 +598,23 @@ fn total_error_sequential(params: &EvalParams, samples: &[Sample], k: f64) -> f6
     sum / samples.len() as f64
 }
 
-/// Calcule l'erreur quadratique moyenne en répartissant le jeu de données
-/// sur `num_threads` threads — chaque thread traite une tranche contiguë et
-/// indépendante du Vec<Sample>, sans aucune écriture partagée (somme locale
-/// par thread, combinée à la fin). C'est une parallélisation "embarrassingly
-/// parallel" : aucun verrou, aucune coordination pendant le calcul.
+/// Computes the mean squared error by splitting the dataset
+/// across `num_threads` threads — each thread processes a contiguous and
+/// independent slice of the Vec<Sample>, with no shared writes at all (local sum
+/// per thread, combined at the end). This is an "embarrassingly
+/// parallel" parallelization: no lock, no coordination during the computation.
 ///
-/// Gain attendu : proche du nombre de cœurs disponibles, puisque chaque
-/// position est indépendante des autres (contrairement à la recherche
-/// alpha-bêta du moteur, où le Lazy SMP doit composer avec du travail
-/// redondant entre threads — ici, zéro redondance).
+/// Expected speedup: close to the number of available cores, since each
+/// position is independent of the others (unlike the engine's
+/// alpha-beta search, where Lazy SMP has to deal with redundant
+/// work between threads — here, zero redundancy).
 fn total_error(params: &EvalParams, samples: &[Sample], num_threads: usize, k: f64) -> f64 {
     if num_threads <= 1 || samples.len() < num_threads * 1000 {
         return total_error_sequential(params, samples, k);
     }
 
-    // Division entière arrondie au supérieur (chaque thread traite un bloc, le
-    // dernier éventuellement plus petit). div_ceil est stable depuis Rust 1.73.
+    // Integer division rounded up (each thread handles a block, the
+    // last one possibly smaller). div_ceil has been stable since Rust 1.73.
     let chunk_size = samples.len().div_ceil(num_threads);
 
     std::thread::scope(|scope| {
@@ -639,23 +639,23 @@ fn total_error(params: &EvalParams, samples: &[Sample], num_threads: usize, k: f
     })
 }
 
-/// Calibre l'échelle de la sigmoïde K en minimisant l'erreur sur le jeu de
-/// données, à PARAMÈTRES D'ÉVALUATION FIXES (les valeurs de départ, voir
-/// note sur sigmoid() plus haut). Recherche ternaire : fonctionne car
-/// l'erreur en fonction de K, pour un eval donné, est unimodale (un seul
-/// minimum) — typique de ce genre de calibrage d'échelle.
+/// Calibrates the sigmoid scale K by minimizing the error on the
+/// dataset, with FIXED EVALUATION PARAMETERS (the starting values, see
+/// the note on sigmoid() above). Ternary search: works because
+/// the error as a function of K, for a given eval, is unimodal (a single
+/// minimum) — typical of this kind of scale calibration.
 ///
-/// Cette étape doit être effectuée UNE FOIS, avant la boucle de coordinate
-/// descent sur les poids — jamais pendant, sous peine de réintroduire la
-/// confusion entre "le bon K" et "les bons poids" qui causait l'effondrement
-/// d'échelle observé dans les versions précédentes du tuner.
+/// This step must be performed ONCE, before the coordinate
+/// descent loop on the weights — never during, at the risk of reintroducing the
+/// confusion between "the right K" and "the right weights" that caused the scale
+/// collapse observed in the tuner's previous versions.
 fn calibrate_k(params: &EvalParams, samples: &[Sample], num_threads: usize) -> f64 {
     let mut lo = 50.0f64;
     let mut hi = 1000.0f64;
 
-    // ~30 itérations suffisent largement à atteindre une précision de 0.01
-    // sur cette plage (chaque itération réduit l'intervalle d'un facteur 2/3) ;
-    // la borne à 60 est une marge de sécurité, la sortie anticipée fait le travail.
+    // ~30 iterations are more than enough to reach a precision of 0.01
+    // over this range (each iteration reduces the interval by a factor of 2/3);
+    // the bound of 60 is a safety margin, the early exit does the work.
     for _ in 0..60 {
         if (hi - lo) < 0.01 { break; }
         let m1 = lo + (hi - lo) / 3.0;
@@ -673,7 +673,7 @@ fn calibrate_k(params: &EvalParams, samples: &[Sample], num_threads: usize) -> f
 }
 
 // =============================================================================
-// Chargement du jeu de données
+// Loading the dataset
 // =============================================================================
 
 fn load_samples(path: &str) -> Vec<Sample> {
@@ -703,19 +703,19 @@ fn load_samples(path: &str) -> Vec<Sample> {
 }
 
 // =============================================================================
-// Point d'entrée
+// Entry point
 // =============================================================================
 
-/// Affiche l'état courant : erreur, temps écoulé, et les paramètres
-/// SCALAIRES uniquement (22, voir PARAM_NAMES) — les 320 paramètres PST
-/// (v4) sont délibérément omis ici : un dump de 320 valeurs toutes les
-/// PRINT_EVERY passes serait illisible. Voir print_pst_table() pour
-/// l'affichage final, formaté et bien plus utile (prêt à copier-coller).
+/// Displays the current state: error, elapsed time, and the
+/// SCALAR parameters only (22, see PARAM_NAMES) — the 320 PST parameters
+/// (v4) are deliberately omitted here: a dump of 320 values every
+/// PRINT_EVERY passes would be unreadable. See print_pst_table() for
+/// the final display, formatted and much more useful (ready to copy-paste).
 ///
-/// BUG ÉVITÉ : la version précédente (v1-v3) bouclait sur `0..NUM_PARAMS`
-/// en indexant PARAM_NAMES[i] — avec NUM_PARAMS désormais à 342 (v4) contre
-/// PARAM_NAMES.len() == 22, ça aurait paniqué (index hors limites) dès le
-/// premier appel. Corrigé en bouclant explicitement sur NUM_SCALAR_PARAMS.
+/// BUG AVOIDED: the previous version (v1-v3) looped over `0..NUM_PARAMS`
+/// while indexing PARAM_NAMES[i] — with NUM_PARAMS now at 342 (v4) versus
+/// PARAM_NAMES.len() == 22, this would have panicked (index out of bounds) on the
+/// very first call. Fixed by explicitly looping over NUM_SCALAR_PARAMS.
 fn print_status(pass: u32, error: f64, elapsed_s: f64, params: &EvalParams) {
     eprintln!(
         "── Passe {:>4} — erreur = {:.6} — {:.1}s écoulées ──",
@@ -727,9 +727,9 @@ fn print_status(pass: u32, error: f64, elapsed_s: f64, params: &EvalParams) {
     eprintln!("    (320 paramètres PST omis ici — voir le rapport final)");
 }
 
-/// Affiche une table PST tunée, formatée comme un tableau Rust prêt à copier
-/// directement dans eval/tables.rs (8 valeurs par ligne, alignées sur 4
-/// caractères — même présentation que les tables actuelles du fichier).
+/// Displays a tuned PST table, formatted as a Rust array ready to copy
+/// directly into eval/tables.rs (8 values per line, aligned to 4
+/// characters — same presentation as the current tables in the file).
 fn print_pst_table(name: &str, params: &EvalParams, base: usize) {
     eprintln!("pub const {}: [i32; 64] = [", name);
     for rank in 0..8 {
@@ -741,16 +741,16 @@ fn print_pst_table(name: &str, params: &EvalParams, base: usize) {
     eprintln!("];");
 }
 
-/// Fréquence d'affichage du détail des paramètres (en nombre de passes).
+/// Frequency of parameter detail display (in number of passes).
 ///
-/// Valeur 100 (héritée de v1/v2/v3) abaissée à 5 pour la v4 : avec 342
-/// paramètres (~15,5× plus coûteux par passe qu'en v3, voir note d'en-tête
-/// v4), 100 passes peuvent représenter 20-30 minutes de silence total dans
-/// le terminal — au point de donner l'impression (à tort) que le programme
-/// est bloqué. À 5 passes, un retour visuel apparaît en quelques dizaines de
-/// secondes à quelques minutes selon le matériel, suffisant pour confirmer
-/// que ça avance sans noyer la sortie comme le ferait un affichage à chaque
-/// passe.
+/// Value 100 (inherited from v1/v2/v3) lowered to 5 for v4: with 342
+/// parameters (~15.5x more expensive per pass than in v3, see the v4
+/// header note), 100 passes can represent 20-30 minutes of total silence in
+/// the terminal — to the point of (wrongly) giving the impression that the program
+/// is stuck. At 5 passes, visual feedback appears within a few dozen
+/// seconds to a few minutes depending on the hardware, enough to confirm
+/// that it's progressing without flooding the output the way a display on every
+/// pass would.
 const PRINT_EVERY: u32 = 5;
 
 fn main() {
@@ -767,10 +767,10 @@ fn main() {
     let samples = load_samples(&args[1]);
     eprintln!("Chargé en {:.1}s", load_start.elapsed().as_secs_f64());
 
-    // Toutes les positions sont déjà en RAM dans `samples` (Vec<Sample>) —
-    // aucune passe ne retouche le disque. Le seul levier de vitesse restant
-    // est la parallélisation du calcul d'erreur lui-même sur les cœurs
-    // disponibles (somme indépendante par position, sans coordination).
+    // All positions are already in RAM in `samples` (Vec<Sample>) —
+    // no pass touches the disk again. The only remaining speed lever
+    // is the parallelization of the error computation itself across the available
+    // cores (independent sum per position, with no coordination).
     let num_threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
@@ -779,11 +779,11 @@ fn main() {
 
     let params0 = EvalParams::default_from_engine();
 
-    // --- Calibrage de K (voir calibrate_k() pour le pourquoi détaillé) ---
-    // Étape OBLIGATOIRE avant le tuning des poids : sans elle, l'optimiseur
-    // compense un mauvais calibrage d'échelle en rétrécissant les poids au
-    // lieu de vraiment les calibrer — c'est ce qui causait l'effondrement
-    // observé dans les versions précédentes du tuner.
+    // --- K calibration (see calibrate_k() for the detailed reasoning) ---
+    // MANDATORY step before tuning the weights: without it, the optimizer
+    // compensates for a bad scale calibration by shrinking the weights instead
+    // of truly calibrating them — this is what caused the collapse
+    // observed in the tuner's previous versions.
     eprintln!("Calibrage de l'échelle K (recherche ternaire sur les valeurs de départ)...");
     let calib_start = Instant::now();
     let k = calibrate_k(&params0, &samples, num_threads);
@@ -796,8 +796,8 @@ fn main() {
     eprintln!("Erreur initiale (valeurs actuelles du moteur, K calibré) : {:.6}", best_error);
     eprintln!();
 
-    // Pas d'ajustement : ±1 sur l'échelle centipions — suffisamment fin
-    // pour ces paramètres, convention Texel Tuning standard.
+    // No adjustment: ±1 on the centipawn scale — fine enough
+    // for these parameters, standard Texel Tuning convention.
     const STEP: i32 = 1;
     let mut improved_any = true;
     let mut pass = 0u32;
@@ -808,25 +808,25 @@ fn main() {
         pass += 1;
 
         for idx in 0..NUM_PARAMS {
-            // --- Essayer +STEP ---
+            // --- Try +STEP ---
             params.values[idx] += STEP;
             let err_plus = total_error(&params, &samples, num_threads, k);
 
             if err_plus < best_error {
                 best_error = err_plus;
                 improved_any = true;
-                continue; // garder +STEP, passer au paramètre suivant
+                continue; // keep +STEP, move to the next parameter
             }
 
-            // --- Annuler le +STEP, puis essayer -STEP ---
-            params.values[idx] -= 2 * STEP; // revient à -STEP par rapport à l'original
+            // --- Undo the +STEP, then try -STEP ---
+            params.values[idx] -= 2 * STEP; // amounts to -STEP relative to the original
             let err_minus = total_error(&params, &samples, num_threads, k);
 
             if err_minus < best_error {
                 best_error = err_minus;
                 improved_any = true;
             } else {
-                // Ni +STEP ni -STEP n'aident : revenir à la valeur d'origine.
+                // Neither +STEP nor -STEP helps: revert to the original value.
                 params.values[idx] += STEP;
             }
         }

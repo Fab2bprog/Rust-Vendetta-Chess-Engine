@@ -1,29 +1,29 @@
 // =============================================================================
 // Vendetta Chess Motor — src/eval/tables.rs
 //
-// Rôle : Tables de positions (PST) et fonctions de lookup pures.
-//        Ce fichier N'IMPORTE JAMAIS board::state — il doit rester accessible
-//        depuis board::state sans créer de dépendance circulaire.
+// Role: Position tables (PST) and pure lookup functions.
+//        This file NEVER imports board::state — it must remain accessible
+//        from board::state without creating a circular dependency.
 //
-// Contenu :
-//   - 7 tables PST (pion, cavalier, fou, tour, dame, roi×2)
-//   - mirror_square() — symétrie verticale pour les Noirs
-//   - piece_square_values() — retourne (mg, eg) pour une pièce sur une case
+// Contents:
+//   - 7 PST tables (pawn, knight, bishop, rook, queen, king×2)
+//   - mirror_square() — vertical symmetry for Black
+//   - piece_square_values() — returns (mg, eg) for a piece on a square
 //
-// Utilisation :
-//   - board::state   → piece_square_values() pour la mise à jour incrémentale
-//   - eval::position → importe les tables pour positional_eval() (debug/test)
+// Usage:
+//   - board::state   → piece_square_values() for incremental update
+//   - eval::position → imports the tables for positional_eval() (debug/test)
 // =============================================================================
 
 use crate::utils::types::{Color, Piece};
 
 // =============================================================================
-// Tables de positions — du point de vue des Blancs
-// Index 0 = a1, index 63 = h8 (rang × 8 + colonne).
-// Les tables sont lues rang par rang de bas en haut (rang 1 → rang 8).
+// Position tables — from White's point of view
+// Index 0 = a1, index 63 = h8 (rank × 8 + file).
+// The tables are read rank by rank from bottom to top (rank 1 → rank 8).
 // =============================================================================
 
-/// Table positionnelle des pions.
+/// Positional table for pawns.
 pub const PAWN_TABLE: [i32; 64] = [
      0,  0,  0,  0,  0,  0,  0,  0,
     50, 50, 50, 50, 50, 50, 50, 50,
@@ -35,7 +35,7 @@ pub const PAWN_TABLE: [i32; 64] = [
      0,  0,  0,  0,  0,  0,  0,  0,
 ];
 
-/// Table positionnelle des cavaliers.
+/// Positional table for knights.
 pub const KNIGHT_TABLE: [i32; 64] = [
     -50,-40,-30,-30,-30,-30,-40,-50,
     -40,-20,  0,  0,  0,  0,-20,-40,
@@ -47,7 +47,7 @@ pub const KNIGHT_TABLE: [i32; 64] = [
     -50,-40,-30,-30,-30,-30,-40,-50,
 ];
 
-/// Table positionnelle des fous.
+/// Positional table for bishops.
 pub const BISHOP_TABLE: [i32; 64] = [
     -20,-10,-10,-10,-10,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
@@ -59,7 +59,7 @@ pub const BISHOP_TABLE: [i32; 64] = [
     -20,-10,-10,-10,-10,-10,-10,-20,
 ];
 
-/// Table positionnelle des tours.
+/// Positional table for rooks.
 pub const ROOK_TABLE: [i32; 64] = [
      0,  0,  0,  0,  0,  0,  0,  0,
      5, 10, 10, 10, 10, 10, 10,  5,
@@ -71,7 +71,7 @@ pub const ROOK_TABLE: [i32; 64] = [
      0,  0,  0,  5,  5,  0,  0,  0,
 ];
 
-/// Table positionnelle des dames.
+/// Positional table for queens.
 pub const QUEEN_TABLE: [i32; 64] = [
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
@@ -83,8 +83,8 @@ pub const QUEEN_TABLE: [i32; 64] = [
     -20,-10,-10, -5, -5,-10,-10,-20,
 ];
 
-/// Table positionnelle du roi en milieu de partie.
-/// Le roi doit rester protégé (de préférence après un roque).
+/// Positional table for the king in the middlegame.
+/// The king must remain protected (preferably after castling).
 pub const KING_MIDDLEGAME_TABLE: [i32; 64] = [
     -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30,
@@ -96,8 +96,8 @@ pub const KING_MIDDLEGAME_TABLE: [i32; 64] = [
      20, 30, 10,  0,  0, 10, 30, 20,
 ];
 
-/// Table positionnelle du roi en finale.
-/// En finale, le roi doit centraliser.
+/// Positional table for the king in the endgame.
+/// In the endgame, the king should centralize.
 pub const KING_ENDGAME_TABLE: [i32; 64] = [
     -50,-40,-30,-20,-20,-30,-40,-50,
     -30,-20,-10,  0,  0,-10,-20,-30,
@@ -110,29 +110,29 @@ pub const KING_ENDGAME_TABLE: [i32; 64] = [
 ];
 
 // =============================================================================
-// Fonctions de lookup
+// Lookup functions
 // =============================================================================
 
-/// Retourne l'index miroir d'une case (pour les Noirs).
-/// Les Blancs voient le rang 1 en bas (index 0–7), les Noirs en haut.
-/// Exemple : a1 (0) ↔ a8 (56).
+/// Returns the mirror index of a square (for Black).
+/// White sees rank 1 at the bottom (index 0–7), Black at the top.
+/// Example: a1 (0) ↔ a8 (56).
 #[inline]
 pub fn mirror_square(sq: u8) -> u8 {
     (7 - sq / 8) * 8 + sq % 8
 }
 
-/// Retourne les contributions PST (midgame, endgame) d'une pièce sur une case,
-/// du point de vue de sa couleur.
+/// Returns the PST contributions (midgame, endgame) of a piece on a square,
+/// from the point of view of its color.
 ///
-/// Pour toutes les pièces sauf le roi, mg == eg (même table).
-/// Pour le roi : mg = KING_MIDDLEGAME_TABLE, eg = KING_ENDGAME_TABLE.
+/// For all pieces except the king, mg == eg (same table).
+/// For the king: mg = KING_MIDDLEGAME_TABLE, eg = KING_ENDGAME_TABLE.
 ///
-/// Le signe ±1 (Blanc = +1, Noir = −1) est appliqué par l'appelant
-/// (`place_piece` / `remove_piece`), pas ici — séparation claire des responsabilités.
+/// The ±1 sign (White = +1, Black = −1) is applied by the caller
+/// (`place_piece` / `remove_piece`), not here — clear separation of responsibilities.
 #[inline]
 pub fn piece_square_values(piece: Piece, color: Color, sq: u8) -> (i32, i32) {
-    // Les tables sont orientées Blanc (rang 1 en bas).
-    // Pour les Noirs, on lit la case miroir.
+    // The tables are oriented for White (rank 1 at the bottom).
+    // For Black, the mirror square is read.
     let idx = if color == Color::White {
         sq as usize
     } else {
@@ -148,11 +148,11 @@ pub fn piece_square_values(piece: Piece, color: Color, sq: u8) -> (i32, i32) {
         Piece::King   => KING_MIDDLEGAME_TABLE[idx],
     };
 
-    // Le roi est la seule pièce avec deux tables distinctes.
+    // The king is the only piece with two distinct tables.
     let eg = if piece == Piece::King {
         KING_ENDGAME_TABLE[idx]
     } else {
-        mg // Toutes les autres pièces : même table MG et EG.
+        mg // All other pieces: same MG and EG table.
     };
 
     (mg, eg)

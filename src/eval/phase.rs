@@ -1,62 +1,62 @@
 // =============================================================================
 // Vendetta Chess Motor — src/eval/phase.rs
 //
-// Rôle : Détection de la phase de jeu (ouverture, milieu de partie, finale).
-//        La phase influence plusieurs aspects de l'évaluation :
-//        - Le roi doit être en sécurité en milieu de partie mais actif en finale
-//        - Les tables de positions changent selon la phase
-//        - La sécurité du roi est moins importante en finale
+// Role: Detection of the game phase (opening, middlegame, endgame).
+//        The phase influences several aspects of the evaluation:
+//        - The king must be safe in the middlegame but active in the endgame
+//        - Piece-square tables change depending on the phase
+//        - King safety is less important in the endgame
 //
-// Contenu :
-//   - Calcul du score de phase basé sur le matériel restant
-//   - Interpolation lisse entre milieu de partie et finale (tapered eval)
+// Contents:
+//   - Calculation of the phase score based on remaining material
+//   - Smooth interpolation between middlegame and endgame (tapered eval)
 //
-// Méthode :
-//   On attribue un "poids de phase" à chaque type de pièce.
-//   Quand le plateau est plein, on est en milieu de partie.
-//   Quand les pièces lourdes disparaissent, on entre en finale.
+// Method:
+//   A "phase weight" is assigned to each piece type.
+//   When the board is full, we are in the middlegame.
+//   When the heavy pieces disappear, we enter the endgame.
 // =============================================================================
 
 use crate::utils::types::{Color, Piece};
 use crate::board::state::Board;
 
-/// Poids de chaque type de pièce pour le calcul de la phase.
-/// Les poids sont calibrés pour que 24 = milieu de partie complet.
+/// Weight of each piece type for the phase calculation.
+/// The weights are calibrated so that 24 = full middlegame.
 const PHASE_WEIGHT: [i32; 6] = [
-    0,  // Pion (ne compte pas pour la phase)
-    1,  // Cavalier
-    1,  // Fou
-    2,  // Tour
-    4,  // Dame
-    0,  // Roi (ne compte pas)
+    0,  // Pawn (does not count for the phase)
+    1,  // Knight
+    1,  // Bishop
+    2,  // Rook
+    4,  // Queen
+    0,  // King (does not count)
 ];
 
-/// Score de phase maximum (partie complète en milieu de partie).
-/// 2 cavaliers + 2 fous + 4 tours + 2 dames par camp :
-/// (2*1 + 2*1 + 4*2 + 2*4) * 2 camps = (2+2+8+8)*2 = 40
+/// Maximum phase score (full game in the middlegame).
+/// 2 knights + 2 bishops + 4 rooks + 2 queens per side:
+/// (2*1 + 2*1 + 4*2 + 2*4) * 2 sides = (2+2+8+8)*2 = 40
 const MAX_PHASE: i32 = 40;
 
-/// Représentation de la phase de jeu.
+/// Representation of the game phase.
 #[derive(Clone, Copy, Debug)]
 pub struct GamePhase {
-    /// Score de phase : 0 = finale pure, MAX_PHASE = milieu de partie pur.
+    /// Phase score: 0 = pure endgame, MAX_PHASE = pure middlegame.
     pub phase_score: i32,
 }
 
 impl GamePhase {
-    /// Retourne true si on est en finale (peu de matériel).
+    /// Returns true if we are in the endgame (little material).
     pub fn is_endgame(self) -> bool {
         self.phase_score < MAX_PHASE / 2
     }
 
-    /// Retourne un facteur entre 0.0 (finale) et 1.0 (milieu de partie).
-    /// Utilisé pour l'interpolation tapered.
+    /// Returns a factor between 0.0 (endgame) and 1.0 (middlegame).
+    /// Used for tapered interpolation.
     pub fn middlegame_factor(self) -> f32 {
         (self.phase_score as f32 / MAX_PHASE as f32).clamp(0.0, 1.0)
     }
 
-    /// Interpolation lisse entre score milieu de partie et score finale.
-    /// Permet une transition graduelle plutôt qu'un saut brutal.
+    /// Smooth interpolation between middlegame score and endgame score.
+    /// Allows a gradual transition rather than an abrupt jump.
     pub fn taper(self, middlegame_score: i32, endgame_score: i32) -> i32 {
         let mg = self.middlegame_factor();
         let eg = 1.0 - mg;
@@ -64,16 +64,16 @@ impl GamePhase {
     }
 }
 
-/// Calcule la phase de jeu de la position courante.
+/// Calculates the game phase of the current position.
 ///
-/// Optimisation — calcul plus léger, résultat identique :
-///   Avant : 8 popcounts sur des bitboards (count_ones() sur 64 bits) ×
-///           2 couleurs × 4 types de pièces.
-///   Après : 8 simples lectures de board.piece_count, un tableau [u8; 6]
-///           déjà maintenu en temps réel par place_piece()/remove_piece()
-///           (utilisé par ailleurs pour is_insufficient_material()).
-///   Même valeur garantie : piece_count est synchronisé avec les bitboards
-///   à chaque coup, c'est juste une lecture directe au lieu d'un recalcul.
+/// Optimization — lighter calculation, identical result:
+///   Before: 8 popcounts on bitboards (count_ones() on 64 bits) ×
+///           2 colors × 4 piece types.
+///   After: 8 simple reads of board.piece_count, an array [u8; 6]
+///           already maintained in real time by place_piece()/remove_piece()
+///           (also used for is_insufficient_material()).
+///   Same value guaranteed: piece_count is synchronized with the bitboards
+///   on every move, it's just a direct read instead of a recalculation.
 pub fn compute_phase(board: &Board) -> GamePhase {
     let mut phase_score = 0i32;
 
@@ -84,7 +84,7 @@ pub fn compute_phase(board: &Board) -> GamePhase {
         }
     }
 
-    // Limiter entre 0 et MAX_PHASE
+    // Clamp between 0 and MAX_PHASE
     phase_score = phase_score.clamp(0, MAX_PHASE);
 
     GamePhase { phase_score }

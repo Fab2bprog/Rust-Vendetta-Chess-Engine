@@ -1,43 +1,43 @@
 // =============================================================================
 // Vendetta Chess Motor — src/uci/mod.rs
 //
-// Rôle : Implémentation complète du protocole UCI (Universal Chess Interface).
-//        Boucle principale de communication entre le moteur et l'interface
-//        graphique (Arena, Lichess, Chessbase, etc.).
+// Role: Complete implementation of the UCI (Universal Chess Interface) protocol.
+//        Main communication loop between the engine and the graphical
+//        interface (Arena, Lichess, Chessbase, etc.).
 //
-// Contenu :
-//   - UciEngine : structure principale qui orchestre tout
-//   - run() : boucle principale UCI (lit stdin, écrit stdout)
-//   - Gestion de toutes les commandes UCI obligatoires + pondering
+// Contents:
+//   - UciEngine: main structure that orchestrates everything
+//   - run(): main UCI loop (reads stdin, writes stdout)
+//   - Handling of all mandatory UCI commands + pondering
 //
-// Architecture de la boucle UCI :
-//   - La lecture de stdin se fait dans un thread dédié via un canal mpsc.
-//     Cela permet à la boucle principale de rester réactive (notamment à
-//     "stop" et "ponderhit") pendant qu'une recherche est en cours.
-//   - La recherche s'exécute dans un thread séparé (spawn_search).
+// UCI loop architecture:
+//   - Reading stdin is done in a dedicated thread via an mpsc channel.
+//     This allows the main loop to stay responsive (notably to
+//     "stop" and "ponderhit") while a search is in progress.
+//   - The search runs in a separate thread (spawn_search).
 //
-// Pondering (réflexion sur le temps adverse) :
-//   Machine d'état à deux modes : Normal et Ponder.
+// Pondering (thinking on the opponent's time):
+//   Two-mode state machine: Normal and Ponder.
 //
-//   Flux ponder complet :
-//     1. Engine → GUI : "bestmove e2e4 ponder e7e5"
-//     2. GUI  → Engine : "position ... moves e2e4 e7e5"
+//   Full ponder flow:
+//     1. Engine → GUI: "bestmove e2e4 ponder e7e5"
+//     2. GUI  → Engine: "position ... moves e2e4 e7e5"
 //                        "go ponder wtime 300000 btime 300000 ..."
-//     3. Engine : lance une recherche INFINIE sur la position après e7e5
-//                 (is_pondering = true, ponder_config sauvegardé)
-//     4a. GUI → Engine : "ponderhit" (adversaire a joué e7e5)
-//          → on stoppe la recherche ponder (TT déjà chaude)
-//          → on relance une recherche NORMALE avec ponder_config (gestion du temps)
-//     4b. GUI → Engine : "stop" (adversaire a joué autre chose)
-//          → on stoppe la recherche ponder
-//          → on envoie "bestmove <meilleur_coup_dans_position_ponder>"
-//          → la GUI enverra ensuite "position" + "go" pour la vraie position
+//     3. Engine: starts an INFINITE search on the position after e7e5
+//                 (is_pondering = true, ponder_config saved)
+//     4a. GUI → Engine: "ponderhit" (opponent played e7e5)
+//          → the ponder search is stopped (TT already warm)
+//          → a NORMAL search is restarted with ponder_config (time management)
+//     4b. GUI → Engine: "stop" (opponent played something else)
+//          → the ponder search is stopped
+//          → "bestmove <best_move_in_ponder_position>" is sent
+//          → the GUI will then send "position" + "go" for the actual position
 //
-// Options UCI de Vendetta Chess Motor :
-//   - Hash (MB)      : taille de la table de transposition (défaut 16 Mo)
-//   - Skill Level    : niveau de difficulté 1-64 (défaut 64 = pleine puissance)
-//   - Threads        : nombre de threads de recherche (défaut = cœurs disponibles)
-//   - Ponder         : active le mode pondering (défaut = true)
+// UCI options of Vendetta Chess Motor:
+//   - Hash (MB)      : transposition table size (default 16 MB)
+//   - Skill Level    : difficulty level 1-64 (default 64 = full strength)
+//   - Threads        : number of search threads (default = available cores)
+//   - Ponder         : enables pondering mode (default = true)
 // =============================================================================
 
 pub mod parser;
@@ -55,77 +55,77 @@ use crate::search::continuation_history::ContinuationHistoryTable;
 use crate::utils::types::Move;
 use parser::{parse_command, parse_move_uci, UciCommand};
 
-/// Nom et version du moteur.
+/// Engine name and version.
 pub const ENGINE_NAME:    &str = "Vendetta Chess Motor";
 pub const ENGINE_VERSION: &str = "1.1.2";
-/// Auteur du projet. Développé en coworking avec Claude (Anthropic) — voir
-/// la section "Remerciements" du README.md pour le détail honnête de cette
-/// collaboration humain/IA.
+/// Project author. Developed in coworking with Claude (Anthropic) — see
+/// the "Acknowledgments" section of README.md for the honest details of this
+/// human/AI collaboration.
 pub const ENGINE_AUTHOR:  &str = "Fabrice Garcia";
 
-/// Moteur UCI principal.
+/// Main UCI engine.
 pub struct UciEngine {
-    /// Partie en cours.
+    /// Current game.
     game: Game,
-    /// Moteur de recherche.
+    /// Search engine.
     search_engine: SearchEngine,
-    /// Niveau de difficulté actuel (1-64), piloté par l'option maison "Skill Level".
+    /// Current difficulty level (1-64), driven by the custom "Skill Level" option.
     skill_level: u8,
-    /// Taille de la table de transposition en Mo.
+    /// Transposition table size in MB.
     hash_size_mb: usize,
 
-    // --- Limitation de force standard UCI ---
+    // --- Standard UCI strength limitation ---
 
-    /// true si "UCI_LimitStrength" est activé : dans ce cas, `elo` prend le
-    /// pas sur `skill_level` pour déterminer la force de jeu (voir la
-    /// commande Go). Permet aux GUIs/plateformes standards de brider
-    /// Vendetta Chess Motor sans connaître l'option maison "Skill Level".
+    /// true if "UCI_LimitStrength" is enabled: in that case, `elo` takes
+    /// precedence over `skill_level` to determine playing strength (see the
+    /// Go command). Allows standard GUIs/platforms to limit
+    /// Vendetta Chess Motor without knowing the custom "Skill Level" option.
     limit_strength: bool,
-    /// Force cible en Elo quand `limit_strength` est actif (option "UCI_Elo").
+    /// Target strength in Elo when `limit_strength` is active ("UCI_Elo" option).
     elo: u16,
-    /// Nombre de variantes principales à afficher (option "MultiPV").
-    /// 1 = comportement standard (une seule meilleure ligne).
+    /// Number of principal variations to display ("MultiPV" option).
+    /// 1 = standard behavior (a single best line).
     multipv: usize,
-    /// Marge de sécurité (ms) retirée du budget de temps (option "Move
-    /// Overhead") — compense la latence GUI/réseau, évite les pertes au
-    /// temps en ligne/tournoi. 50 ms par défaut (valeur de l'ancienne marge
-    /// fixe codée en dur dans compute_time_limit(), désormais réglable).
+    /// Safety margin (ms) subtracted from the time budget ("Move
+    /// Overhead" option) — compensates for GUI/network latency, avoids losses on
+    /// time online/in tournaments. 50 ms by default (value of the former
+    /// fixed margin hard-coded in compute_time_limit(), now adjustable).
     move_overhead_ms: u64,
-    /// true si "UCI_AnalyseMode" est activé : force toujours le meilleur
-    /// coup (skill_level = 64), quels que soient "Skill Level" ou
-    /// "UCI_LimitStrength" — un outil d'analyse ne doit jamais recevoir
-    /// une erreur volontaire du système de niveaux de difficulté.
+    /// true if "UCI_AnalyseMode" is enabled: always forces the best
+    /// move (skill_level = 64), regardless of "Skill Level" or
+    /// "UCI_LimitStrength" — an analysis tool must never receive
+    /// a deliberate error from the difficulty level system.
     analyse_mode: bool,
-    /// Facteur de contempt en centipions (option UCI "Contempt"). 0 par
-    /// défaut = comportement inchangé (aucune pénalité sur les positions
-    /// nulles). Une valeur positive pénalise légèrement la nullité du point
-    /// de vue du camp que le moteur joue actuellement — utile contre un
-    /// adversaire plus faible, pour continuer à chercher la victoire plutôt
-    /// que de se contenter d'un partage des points. Voir
-    /// alphabeta.rs::draw_score() pour le mécanisme exact.
+    /// Contempt factor in centipawns (UCI "Contempt" option). 0 by
+    /// default = unchanged behavior (no penalty on drawn positions).
+    /// A positive value slightly penalizes drawishness from the point
+    /// of view of the side the engine is currently playing — useful against a
+    /// weaker opponent, to keep trying to win rather
+    /// than settle for a draw. See
+    /// alphabeta.rs::draw_score() for the exact mechanism.
     contempt: i32,
-    /// Handle du thread de recherche en cours (None si inactif).
+    /// Handle of the currently running search thread (None if inactive).
     search_handle: Option<std::thread::JoinHandle<SearchResult>>,
 
-    // --- État du pondering ---
+    // --- Pondering state ---
 
-    /// true quand la recherche en cours est en mode ponder
-    /// (réflexion sur le temps de l'adversaire).
+    /// true when the ongoing search is in ponder mode
+    /// (thinking on the opponent's time).
     is_pondering: bool,
-    /// Configuration UCI sauvegardée lors du "go ponder".
-    /// Utilisée pour lancer la recherche normale au "ponderhit".
+    /// UCI configuration saved during "go ponder".
+    /// Used to launch the normal search on "ponderhit".
     ponder_config: Option<SearchConfig>,
 
-    // --- Mode debug ---
+    // --- Debug mode ---
 
-    /// true si le mode debug UCI est activé ("debug on").
-    /// Quand actif, le moteur peut émettre des "info string" supplémentaires
-    /// pour faciliter le diagnostic.
+    /// true if UCI debug mode is enabled ("debug on").
+    /// When active, the engine may emit additional "info string"
+    /// messages to help with diagnostics.
     debug_mode: bool,
 }
 
 impl UciEngine {
-    /// Crée un nouveau moteur UCI.
+    /// Creates a new UCI engine.
     pub fn new() -> UciEngine {
         UciEngine {
             game:          Game::new(),
@@ -145,17 +145,17 @@ impl UciEngine {
         }
     }
 
-    /// Boucle principale UCI.
+    /// Main UCI loop.
     ///
-    /// Architecture :
-    ///   - Thread dédié pour stdin → canal mpsc (recv_timeout 5 ms).
-    ///   - Boucle principale non bloquante → réactive aux commandes en temps réel.
-    ///   - Recherche dans un thread séparé (spawn_search).
-    ///   - check_search_done() détecte la fin de recherche et émet bestmove.
+    /// Architecture:
+    ///   - Dedicated thread for stdin → mpsc channel (recv_timeout 5 ms).
+    ///   - Non-blocking main loop → responsive to commands in real time.
+    ///   - Search in a separate thread (spawn_search).
+    ///   - check_search_done() detects the end of the search and emits bestmove.
     pub fn run(&mut self) {
         let stdout = io::stdout();
 
-        // Thread dédié à la lecture de stdin (non-bloquant pour la boucle principale).
+        // Thread dedicated to reading stdin (non-blocking for the main loop).
         let (tx, rx) = mpsc::channel::<String>();
         std::thread::spawn(move || {
             let stdin = io::stdin();
@@ -168,10 +168,10 @@ impl UciEngine {
         });
 
         'main: loop {
-            // Vérifier si la recherche en cours est terminée → émettre bestmove
+            // Check whether the ongoing search has finished → emit bestmove
             self.check_search_done(&stdout);
 
-            // Attendre une commande UCI (timeout pour rester réactif)
+            // Wait for a UCI command (timeout to stay responsive)
             let line = match rx.recv_timeout(Duration::from_millis(5)) {
                 Ok(l)                                     => l,
                 Err(mpsc::RecvTimeoutError::Timeout)      => continue 'main,
@@ -193,21 +193,21 @@ impl UciEngine {
                 }
 
                 UciCommand::Position { fen, moves } => {
-                    // Si un ponder est en cours sur une position différente,
-                    // il doit être stoppé (la GUI envoie une nouvelle position).
+                    // If a ponder is in progress on a different position,
+                    // it must be stopped (the GUI is sending a new position).
                     self.abort_ponder();
                     self.cmd_position(fen, moves);
                 }
 
                 UciCommand::Go(mut config) => {
-                    // Priorité (de la plus forte à la plus faible) :
-                    //   1. UCI_AnalyseMode : toujours le meilleur coup, jamais
-                    //      d'erreur volontaire — un outil d'analyse ne doit
-                    //      jamais recevoir une réponse délibérément affaiblie.
-                    //   2. UCI_LimitStrength + UCI_Elo : mécanisme standard de
-                    //      bridage, pour les GUIs/plateformes qui ne connaissent
-                    //      pas l'option maison "Skill Level".
-                    //   3. "Skill Level" : option maison, réglage par défaut.
+                    // Priority (from highest to lowest):
+                    //   1. UCI_AnalyseMode: always the best move, never
+                    //      a deliberate error — an analysis tool must
+                    //      never receive a deliberately weakened response.
+                    //   2. UCI_LimitStrength + UCI_Elo: standard
+                    //      limiting mechanism, for GUIs/platforms that don't
+                    //      know the custom "Skill Level" option.
+                    //   3. "Skill Level": custom option, default setting.
                     config.skill_level = if self.analyse_mode {
                         64
                     } else if self.limit_strength {
@@ -219,54 +219,54 @@ impl UciEngine {
                     config.move_overhead = self.move_overhead_ms;
                     config.contempt      = self.contempt;
 
-                    // Arrêter toute recherche en cours (normale ou ponder)
+                    // Stop any ongoing search (normal or ponder)
                     self.stop_current_search();
 
-                    // Réinitialiser l'état ponder systématiquement avant tout nouveau Go,
-                    // même si ce n'est pas un Go ponder (défense contre GUIs non conformes).
+                    // Systematically reset the ponder state before any new Go,
+                    // even if it isn't a ponder Go (defense against non-compliant GUIs).
                     self.is_pondering  = false;
                     self.ponder_config = None;
 
                     if config.ponder {
-                        // --- Mode ponder ---
-                        // Sauvegarder la config pour l'utiliser lors du ponderhit.
-                        // Lancer une recherche INFINIE sur la position adverse attendue.
+                        // --- Ponder mode ---
+                        // Save the config for use during ponderhit.
+                        // Start an INFINITE search on the expected opponent position.
                         self.ponder_config = Some(config.clone());
                         self.is_pondering  = true;
 
-                        // Le thread de recherche tourne en mode infini :
-                        // il ignorera les limites de temps et attendra stop/ponderhit.
+                        // The search thread runs in infinite mode:
+                        // it will ignore time limits and wait for stop/ponderhit.
                         let mut ponder_cfg     = config;
                         ponder_cfg.infinite    = true;
-                        ponder_cfg.ponder      = false; // Le thread n'a pas besoin de le savoir
-                        ponder_cfg.wtime       = None;  // Pas de gestion du temps en ponder
+                        ponder_cfg.ponder      = false; // The thread doesn't need to know this
+                        ponder_cfg.wtime       = None;  // No time management in ponder mode
                         ponder_cfg.btime       = None;
                         ponder_cfg.movetime    = None;
 
                         match self.spawn_search(ponder_cfg) {
                             Ok(handle) => self.search_handle = Some(handle),
                             Err(_) => {
-                                // Thread impossible à créer : le ponder est une
-                                // recherche INFINIE, on ne peut donc PAS la faire
-                                // en synchrone (elle bloquerait à jamais). On
-                                // abandonne le ponder silencieusement ; la GUI
-                                // enverra un vrai "go" (ou "ponderhit") ensuite.
+                                // Thread could not be created: pondering is an
+                                // INFINITE search, so it CANNOT be done
+                                // synchronously (it would block forever). We
+                                // silently abandon the ponder; the GUI
+                                // will then send an actual "go" (or "ponderhit").
                                 self.is_pondering  = false;
                                 self.ponder_config = None;
                             }
                         }
                     } else {
-                        // --- Mode normal ---
+                        // --- Normal mode ---
                         match self.spawn_search(config.clone()) {
                             Ok(handle) => self.search_handle = Some(handle),
                             Err(_) => {
-                                // REPLI ROBUSTE : l'OS ne peut pas créer le thread
-                                // de recherche. Plutôt que de planter, on cherche
-                                // en SYNCHRONE sur le thread courant, forcé à 1
-                                // thread (les spawns SMP échoueraient aussi). La
-                                // boucle UCI est bloquée le temps de la recherche,
-                                // mais la limite de temps est respectée → un
-                                // bestmove est bien émis.
+                                // ROBUST FALLBACK: the OS cannot create the search
+                                // thread. Rather than crash, we search
+                                // SYNCHRONOUSLY on the current thread, forced to 1
+                                // thread (SMP spawns would fail too). The
+                                // UCI loop is blocked for the duration of the search,
+                                // but the time limit is respected → a
+                                // bestmove is indeed emitted.
                                 let board = self.game.board.clone();
                                 let tt    = Arc::clone(&self.search_engine.tt);
                                 let stop  = Arc::clone(&self.search_engine.stop_flag);
@@ -279,26 +279,26 @@ impl UciEngine {
                 }
 
                 UciCommand::PonderHit => {
-                    // L'adversaire a joué le coup prédit : on sort du mode ponder
-                    // et on démarre une recherche normale avec les paramètres sauvegardés.
+                    // The opponent played the predicted move: we exit ponder mode
+                    // and start a normal search with the saved parameters.
                     if self.is_pondering {
-                        // 1. Stopper la recherche ponder (la TT reste chaude)
+                        // 1. Stop the ponder search (the TT stays warm)
                         self.search_engine.stop();
                         if let Some(h) = self.search_handle.take() {
-                            let _ = h.join(); // Attendre la fin propre (~quelques ms)
+                            let _ = h.join(); // Wait for a clean end (~a few ms)
                         }
                         self.is_pondering = false;
 
-                        // 2. Lancer la recherche normale avec les paramètres du "go ponder"
+                        // 2. Start the normal search with the "go ponder" parameters
                         if let Some(mut real_cfg) = self.ponder_config.take() {
                             real_cfg.ponder = false;
-                            // Réinitialiser le stop_flag avant de lancer la nouvelle recherche
+                            // Reset the stop_flag before starting the new search
                             self.search_engine.stop_flag.store(false, Ordering::SeqCst);
                             match self.spawn_search(real_cfg.clone()) {
                                 Ok(handle) => self.search_handle = Some(handle),
                                 Err(_) => {
-                                    // Même repli robuste que pour un "go" normal :
-                                    // recherche synchrone mono-thread plutôt que panic.
+                                    // Same robust fallback as for a normal "go":
+                                    // synchronous single-thread search rather than panic.
                                     let board = self.game.board.clone();
                                     let tt    = Arc::clone(&self.search_engine.tt);
                                     let stop  = Arc::clone(&self.search_engine.stop_flag);
@@ -309,13 +309,13 @@ impl UciEngine {
                             }
                         }
                     }
-                    // Si ponderhit arrive sans go ponder préalable : on l'ignore.
+                    // If ponderhit arrives without a prior go ponder: it is ignored.
                 }
 
                 UciCommand::Stop => {
-                    // Arrêt de toute recherche en cours.
-                    // En mode ponder : la GUI a décidé d'arrêter (adversaire a joué autre chose).
-                    // bestmove sera émis par check_search_done() à la prochaine itération.
+                    // Stop any ongoing search.
+                    // In ponder mode: the GUI has decided to stop (opponent played something else).
+                    // bestmove will be emitted by check_search_done() on the next iteration.
                     self.is_pondering = false;
                     self.ponder_config = None;
                     self.search_engine.stop();
@@ -329,10 +329,10 @@ impl UciEngine {
                 }
 
                 UciCommand::Register => {
-                    // Vendetta Chess Motor n'a AUCUNE protection anti-copie : on
-                    // accepte la commande sans rien faire. La spec interdit
-                    // d'émettre une réponse "registration" si le moteur n'en a
-                    // pas besoin — donc no-op. Signalé seulement en mode debug.
+                    // Vendetta Chess Motor has NO anti-copy protection: it
+                    // accepts the command without doing anything. The spec forbids
+                    // issuing a "registration" response if the engine does not
+                    // need one — hence no-op. Reported only in debug mode.
                     if self.debug_mode {
                         println!("info string register ignoré (aucune protection anti-copie)");
                     }
@@ -343,7 +343,7 @@ impl UciEngine {
                 }
 
                 UciCommand::Quit => {
-                    // Arrêt propre avant de quitter
+                    // Clean shutdown before quitting
                     self.search_engine.stop();
                     if let Some(h) = self.search_handle.take() {
                         let _ = h.join();
@@ -352,7 +352,7 @@ impl UciEngine {
                 }
 
                 UciCommand::Unknown => {
-                    // Ignorer silencieusement (requis par la spec UCI)
+                    // Silently ignore (required by the UCI spec)
                 }
             }
 
@@ -361,11 +361,11 @@ impl UciEngine {
     }
 
     // =========================================================================
-    // Gestion du thread de recherche
+    // Search thread management
     // =========================================================================
 
-    /// Stoppe la recherche en cours et attend la fin du thread.
-    /// Ne touche pas à is_pondering (appelant responsable).
+    /// Stops the current search and waits for the thread to finish.
+    /// Does not touch is_pondering (caller's responsibility).
     fn stop_current_search(&mut self) {
         if self.search_handle.is_some() {
             self.search_engine.stop();
@@ -375,8 +375,8 @@ impl UciEngine {
         }
     }
 
-    /// Stoppe un ponder en cours sans émettre bestmove.
-    /// Utilisé quand la GUI envoie une nouvelle position pendant un ponder.
+    /// Stops an ongoing ponder without emitting bestmove.
+    /// Used when the GUI sends a new position during a ponder.
     fn abort_ponder(&mut self) {
         if self.is_pondering {
             self.search_engine.stop();
@@ -388,17 +388,17 @@ impl UciEngine {
         }
     }
 
-    /// Vérifie si la recherche est terminée et émet bestmove le cas échéant.
+    /// Checks whether the search has finished and emits bestmove if so.
     ///
-    /// En mode ponder, cette fonction est appelée à chaque itération mais
-    /// n'émet JAMAIS bestmove tant que is_pondering est true : la recherche
-    /// ponder tourne jusqu'à ponderhit ou stop.
+    /// In ponder mode, this function is called at every iteration but
+    /// NEVER emits bestmove while is_pondering is true: the ponder
+    /// search runs until ponderhit or stop.
     fn check_search_done(&mut self, stdout: &io::Stdout) {
-        // En mode ponder actif, la recherche tourne librement — on ne fait rien.
+        // In active ponder mode, the search runs freely — we do nothing.
         if self.is_pondering {
-            // Vérification de sécurité : si le thread se termine de lui-même pendant
-            // un ponder (impossible en mode infini, mais défense en profondeur), on nettoie
-            // sans émettre bestmove (ce n'est pas une fin de recherche normale).
+            // Safety check: if the thread finishes on its own during
+            // a ponder (impossible in infinite mode, but defense in depth), we clean up
+            // without emitting bestmove (this is not a normal end of search).
             let thread_done = self.search_handle
                 .as_ref()
                 .map(|h| h.is_finished())
@@ -411,7 +411,7 @@ impl UciEngine {
             return;
         }
 
-        // Mode normal : émettre bestmove dès que le thread est terminé.
+        // Normal mode: emit bestmove as soon as the thread has finished.
         if let Some(handle) = self.search_handle.take() {
             if handle.is_finished() {
                 match handle.join() {
@@ -425,22 +425,22 @@ impl UciEngine {
                     }
                 }
             } else {
-                // Recherche encore en cours : remettre le handle
+                // Search still in progress: put the handle back
                 self.search_handle = Some(handle);
             }
         }
     }
 
-    /// Émet "bestmove <coup> [ponder <coup_attendu>]" sur stdout.
+    /// Emits "bestmove <move> [ponder <expected_move>]" on stdout.
     fn emit_bestmove(&self, result: &SearchResult, stdout: &io::Stdout) {
         if result.best_move.is_null() {
-            // Aucun coup légal (mat ou pat).
-            // On émet "(none)" plutôt que "0000" : la notation "0000" n'est pas
-            // standard UCI et certaines GUIs (Cutechess, Fritz) la rejettent ou
-            // se déconnectent. "(none)" est la convention acceptée universellement.
+            // No legal move (checkmate or stalemate).
+            // We emit "(none)" rather than "0000": the "0000" notation is not
+            // standard UCI and some GUIs (Cutechess, Fritz) reject it or
+            // disconnect. "(none)" is the universally accepted convention.
             println!("bestmove (none)");
         } else if !result.ponder_move.is_null() {
-            // Inclure le coup de réponse prédit pour que la GUI puisse lancer un ponder
+            // Include the predicted reply move so the GUI can start a ponder
             println!("bestmove {} ponder {}",
                 result.best_move.to_uci(),
                 result.ponder_move.to_uci());
@@ -450,12 +450,12 @@ impl UciEngine {
         let _ = stdout.lock().flush();
     }
 
-    /// Lance la recherche dans un thread dédié et renvoie son JoinHandle.
+    /// Launches the search in a dedicated thread and returns its JoinHandle.
     ///
-    /// Renvoie `Err` si l'OS refuse de créer le thread (ressources épuisées,
-    /// cas catastrophique) AU LIEU de paniquer : l'appelant (commande Go)
-    /// bascule alors sur un repli synchrone. Comportement normal strictement
-    /// inchangé — le chemin `Ok` est exactement l'ancien.
+    /// Returns `Err` if the OS refuses to create the thread (resources exhausted,
+    /// catastrophic case) INSTEAD of panicking: the caller (Go command)
+    /// then falls back to a synchronous path. Normal behavior strictly
+    /// unchanged — the `Ok` path is exactly the old one.
     fn spawn_search(
         &mut self,
         config: SearchConfig,
@@ -465,23 +465,23 @@ impl UciEngine {
         let stop        = Arc::clone(&self.search_engine.stop_flag);
         let num_threads = self.search_engine.num_threads;
 
-        // Réinitialiser le signal d'arrêt avant le lancement.
+        // Reset the stop signal before launching.
         stop.store(false, Ordering::SeqCst);
 
-        // Pile de 8 Mio (au lieu du défaut ~2 Mio) : ce thread mène la recherche
-        // PRINCIPALE à pleine profondeur, le plus exposé à la récursion profonde
-        // + aux listes de coups allouées sur la pile (MoveList, captures scorées).
-        // Le corps est délégué à run_search(), partagé avec le repli synchrone.
+        // 8 MiB stack (instead of the ~2 MiB default): this thread carries out the
+        // MAIN search at full depth, the most exposed to deep recursion
+        // + to move lists allocated on the stack (MoveList, scored captures).
+        // The body is delegated to run_search(), shared with the synchronous fallback.
         std::thread::Builder::new()
             .stack_size(8 * 1024 * 1024)
             .spawn(move || run_search(tt, stop, num_threads, board, config))
     }
 
     // =========================================================================
-    // Gestionnaires des commandes UCI
+    // UCI command handlers
     // =========================================================================
 
-    /// Commande "uci" : identifier le moteur et lister les options.
+    /// "uci" command: identify the engine and list the options.
     fn cmd_uci(&self) {
         println!("id name {} {}", ENGINE_NAME, ENGINE_VERSION);
         println!("id author {}", ENGINE_AUTHOR);
@@ -497,43 +497,43 @@ impl UciEngine {
             .unwrap_or(1);
         println!("option name Threads type spin default {} min 1 max 768", default_threads);
 
-        // --- Options UCI standards (interopérabilité avec GUIs/plateformes) ---
-        // UCI_LimitStrength + UCI_Elo : mécanisme standard de bridage de force,
-        // alternative à "Skill Level" pour les outils qui ne connaissent pas
-        // cette option maison (voir search::elo_to_skill_level).
+        // --- Standard UCI options (interoperability with GUIs/platforms) ---
+        // UCI_LimitStrength + UCI_Elo: standard mechanism for limiting strength,
+        // an alternative to "Skill Level" for tools that don't know about
+        // this custom option (see search::elo_to_skill_level).
         println!("option name UCI_LimitStrength type check default false");
         println!("option name UCI_Elo type spin default {} min {} max {}", ELO_MAX, ELO_MIN, ELO_MAX);
-        // MultiPV : nombre de variantes principales affichées (1 = défaut standard).
+        // MultiPV: number of principal variations displayed (1 = standard default).
         println!("option name MultiPV type spin default 1 min 1 max 218");
 
-        // Move Overhead : marge de sécurité (ms) contre les pertes au temps
-        // dues à la latence GUI/réseau — remplace l'ancienne marge fixe de
-        // 50 ms codée en dur dans compute_time_limit() (même valeur par défaut).
+        // Move Overhead: safety margin (ms) against time losses
+        // due to GUI/network latency — replaces the old fixed margin of
+        // 50 ms hard-coded in compute_time_limit() (same default value).
         println!("option name Move Overhead type spin default 50 min 0 max 5000");
 
-        // Clear Hash : bouton qui vide la table de transposition manuellement,
-        // sans avoir à envoyer "ucinewgame" (qui réinitialise aussi killers/history).
+        // Clear Hash: button that manually clears the transposition table,
+        // without having to send "ucinewgame" (which also resets killers/history).
         println!("option name Clear Hash type button");
 
-        // UCI_AnalyseMode : force toujours le meilleur coup (skill_level=64),
-        // prioritaire sur "Skill Level" et "UCI_LimitStrength" — voir la
-        // commande Go. Utile pour les outils d'analyse qui ne veulent jamais
-        // d'erreur volontaire de la part du moteur.
+        // UCI_AnalyseMode: always forces the best move (skill_level=64),
+        // takes priority over "Skill Level" and "UCI_LimitStrength" — see the
+        // Go command. Useful for analysis tools that never want
+        // deliberate error from the engine.
         println!("option name UCI_AnalyseMode type check default false");
 
-        // Contempt : pénalise légèrement les positions nulles (toutes causes)
-        // du point de vue du camp que le moteur joue actuellement — utile
-        // contre un adversaire plus faible (continuer à chercher la victoire
-        // plutôt que se contenter d'un partage des points). 0 = comportement
-        // inchangé (par défaut). Convention standard : centipions, plage
-        // -100 à 100. Voir alphabeta.rs::draw_score() pour le mécanisme.
+        // Contempt: slightly penalizes drawn positions (all causes)
+        // from the point of view of the side the engine is currently playing — useful
+        // against a weaker opponent (keep looking for a win
+        // rather than settling for a draw). 0 = behavior
+        // unchanged (default). Standard convention: centipawns, range
+        // -100 to 100. See alphabeta.rs::draw_score() for the mechanism.
         println!("option name Contempt type spin default 0 min -100 max 100");
 
-        // UCI_EngineAbout : information cosmétique sur le moteur, sans effet
-        // fonctionnel — convention UCI pour afficher auteur/licence/lien.
-        // Auteur initial = ENGINE_AUTHOR (Fabrice Garcia) ; le moteur a été
-        // développé en coworking avec Claude (Anthropic), mentionné ici en
-        // tant que contributeur par souci d'honnêteté.
+        // UCI_EngineAbout: cosmetic information about the engine, with no
+        // functional effect — UCI convention for displaying author/license/link.
+        // Original author = ENGINE_AUTHOR (Fabrice Garcia); the engine was
+        // developed in co-working with Claude (Anthropic), mentioned here
+        // as a contributor for the sake of honesty.
         println!(
             "option name UCI_EngineAbout type string default {} {} - Auteur initial: {} - Contributeur: Claude (Anthropic) - GPL-3.0",
             ENGINE_NAME, ENGINE_VERSION, ENGINE_AUTHOR
@@ -543,16 +543,16 @@ impl UciEngine {
         println!("uciok");
     }
 
-    /// Commande "ucinewgame" : réinitialiser pour une nouvelle partie.
+    /// "ucinewgame" command: reset for a new game.
     fn cmd_new_game(&mut self) {
-        // Stopper tout ponder ou recherche en cours avant le reset
+        // Stop any ongoing ponder or search before the reset
         self.abort_ponder();
         self.stop_current_search();
         self.game.reset();
         self.search_engine.new_game();
     }
 
-    /// Commande "position" : définir la position courante.
+    /// "position" command: set the current position.
     fn cmd_position(&mut self, fen: Option<String>, moves: Vec<String>) {
         if let Some(fen_str) = fen {
             match Game::from_fen(&fen_str) {
@@ -576,23 +576,23 @@ impl UciEngine {
         }
     }
 
-    /// Commande "setoption" : configurer une option du moteur.
+    /// "setoption" command: configure an engine option.
     fn cmd_setoption(&mut self, name: &str, value: &str) {
         match name {
             "Hash" => {
                 if let Ok(size) = value.parse::<usize>() {
-                    // Plafond à 32 Go (32768 Mo) : large pour toute machine
-                    // moderne, sans changer le défaut (32 Mo) qui protège les
-                    // configs modestes.
+                    // Cap at 32 GB (32768 MB): generous for any
+                    // modern machine, without changing the default (32 MB) that protects
+                    // modest setups.
                     let requested = size.clamp(1, 32768);
 
-                    // REPLI GRACIEUX (priorité robustesse de Vendetta Chess Motor) :
-                    // on tente la taille demandée, puis on RÉDUIT DE MOITIÉ tant
-                    // que l'allocation échoue — au lieu de planter. La TT est
-                    // allouée d'un bloc : un réglage Hash plus grand que la RAM
-                    // disponible ne doit JAMAIS tuer le moteur. En dernier
-                    // recours (même la taille minimale échoue), on conserve la
-                    // table actuelle. Un message "info string" informe la GUI.
+                    // GRACEFUL FALLBACK (Vendetta Chess Motor's robustness priority):
+                    // we try the requested size, then HALVE IT repeatedly as long
+                    // as the allocation fails — instead of crashing. The TT is
+                    // allocated as one block: a Hash setting larger than the available
+                    // RAM must NEVER kill the engine. As a last
+                    // resort (even the minimum size fails), we keep the
+                    // current table. An "info string" message informs the GUI.
                     let mut try_size = requested;
                     loop {
                         if let Some(tt) =
@@ -632,8 +632,8 @@ impl UciEngine {
                 }
             }
             "Ponder" => {
-                // Option informative — le pondering est toujours supporté.
-                // On accepte l'option pour la conformité UCI sans action nécessaire.
+                // Informational option — pondering is always supported.
+                // We accept the option for UCI conformity, no action needed.
             }
             "UCI_LimitStrength" => {
                 self.limit_strength = value.eq_ignore_ascii_case("true");
@@ -654,11 +654,11 @@ impl UciEngine {
                 }
             }
             "Clear Hash" => {
-                // Option de type "button" : aucune valeur, l'arrivée même de
-                // la commande déclenche l'action. Vide la TT immédiatement —
-                // équivalent partiel à "ucinewgame", mais sans toucher aux
-                // killer moves / history (qui ne sont réinitialisés qu'entre
-                // deux parties, pas en cours de réflexion).
+                // Option of type "button": no value, the mere arrival of
+                // the command triggers the action. Clears the TT immediately —
+                // a partial equivalent to "ucinewgame", but without touching
+                // killer moves / history (which are only reset between
+                // games, not while thinking).
                 self.search_engine.tt.clear();
             }
             "UCI_AnalyseMode" => {
@@ -670,10 +670,10 @@ impl UciEngine {
                 }
             }
             "UCI_EngineAbout" => {
-                // Option informative en lecture — déclarée pour la conformité
-                // UCI (toute option annoncée doit pouvoir être "set" sans
-                // erreur), mais sans effet : c'est le moteur qui informe la
-                // GUI via cette option, pas l'inverse.
+                // Read-only informational option — declared for
+                // UCI conformity (any announced option must be able to be "set" without
+                // error), but with no effect: it is the engine that informs the
+                // GUI via this option, not the other way around.
             }
             _ => {
                 eprintln!("info string Option inconnue : {}", name);
@@ -688,17 +688,17 @@ impl Default for UciEngine {
     }
 }
 
-/// Exécute une recherche complète (MultiPV compris) et renvoie le MEILLEUR
-/// résultat (results[0]).
+/// Runs a full search (including MultiPV) and returns the BEST
+/// result (results[0]).
 ///
-/// Fonction partagée par deux appelants :
-///   - le thread de recherche dédié (cas NORMAL, via spawn_search) ;
-///   - le repli SYNCHRONE déclenché si la création de ce thread échoue
-///     (voir la commande Go) — appelée alors avec `num_threads = 1`.
+/// Function shared by two callers:
+///   - the dedicated search thread (NORMAL case, via spawn_search);
+///   - the SYNCHRONOUS fallback triggered if creating this thread fails
+///     (see the Go command) — then called with `num_threads = 1`.
 ///
-/// L'extraction évite toute duplication : une seule définition du déroulé de
-/// recherche + de l'affichage MultiPV. Le comportement du cas normal est
-/// strictement identique à l'ancienne closure inline.
+/// This extraction avoids any duplication: a single definition of the search
+/// flow + MultiPV display. The behavior of the normal case is
+/// strictly identical to the old inline closure.
 fn run_search(
     tt:          Arc<crate::search::transposition::TranspositionTable>,
     stop:        Arc<std::sync::atomic::AtomicBool>,
@@ -716,14 +716,14 @@ fn run_search(
         stop_flag:    stop,
     };
 
-    // search_multipv() est strictement équivalente à search() quand
-    // config.multipv <= 1 (cas par défaut) — zéro changement de comportement
-    // pour une partie normale.
+    // search_multipv() is strictly equivalent to search() when
+    // config.multipv <= 1 (default case) — zero change in behavior
+    // for a normal game.
     let results = engine.search_multipv(&mut board, &config);
 
-    // En MultiPV (>1 ligne), un récapitulatif par variante, de la meilleure (1)
-    // à la moins bonne. (Limitation connue : les "info depth" intermédiaires ne
-    // portent pas le champ "multipv" ; sans incidence sur le résultat final.)
+    // In MultiPV (>1 line), a summary per variation, from the best (1)
+    // to the worst. (Known limitation: intermediate "info depth" entries do
+    // not carry the "multipv" field; no impact on the final result.)
     if results.len() > 1 {
         for (i, r) in results.iter().enumerate() {
             let nps = crate::search::compute_nps(r.nodes, r.time_ms);
@@ -736,7 +736,7 @@ fn run_search(
         let _ = io::stdout().lock().flush();
     }
 
-    // bestmove/ponder reposent toujours sur la MEILLEURE ligne (results[0]).
+    // bestmove/ponder always rely on the BEST line (results[0]).
     results.into_iter().next().unwrap_or(SearchResult {
         best_move: Move::NULL, ponder_move: Move::NULL,
         score: 0, depth: 0, nodes: 0, time_ms: 0,

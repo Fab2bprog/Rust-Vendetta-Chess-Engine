@@ -1,14 +1,14 @@
 // =============================================================================
 // Vendetta Chess Motor — src/search/alphabeta.rs
 //
-// Rôle : Algorithme de recherche alpha-bêta avec toutes ses heuristiques.
-//        C'est le cœur de l'intelligence du moteur.
+// Role: Alpha-beta search algorithm with all its heuristics.
+//        This is the heart of the engine's intelligence.
 //
-// Contenu :
-//   - alpha_beta() : recherche principale avec élagage alpha-bêta
-//   - quiescence() : recherche de quiescence (captures ; gestion correcte des
-//     positions où le camp au trait subit un échec — voir doc de la fonction)
-//   - order_moves() : ordonnancement des coups pour maximiser les coupures
+// Contents:
+//   - alpha_beta(): main search with alpha-beta pruning
+//   - quiescence(): quiescence search (captures; correct handling of
+//     positions where the side to move is in check — see the function's doc)
+//   - order_moves(): move ordering to maximize cutoffs
 //   - Principal Variation Search (PVS)
 //   - Null move pruning
 //   - Late Move Reduction (LMR)
@@ -16,47 +16,47 @@
 //   - Internal Iterative Reduction (IIR)
 //   - Mate Distance Pruning
 //   - Reverse Futility Pruning (Static Null Move)
-//   - Razoring (anciennement nommé "Futility Pruning" dans ce fichier —
-//     renommé pour correspondre à la terminologie standard)
-//   - Delta Pruning (futility en quiescence)
+//   - Razoring (formerly named "Futility Pruning" in this file —
+//     renamed to match standard terminology)
+//   - Delta Pruning (futility in quiescence)
 //   - Check Extension
 //   - Singular Extension (SE)
-//   - Killer moves, history heuristic et countermove heuristic intégrés
+//   - Killer moves, history heuristic and countermove heuristic integrated
 //
-// Principe de l'alpha-bêta :
-//   On maintient une fenêtre [alpha, beta].
-//   - alpha : meilleur score que le joueur actif est assuré d'obtenir
-//   - beta  : meilleur score que l'adversaire est assuré d'obtenir
-//   Si un coup dépasse beta, l'adversaire l'éviterait → on coupe (beta cutoff).
-//   Si un coup améliore alpha, on met à jour le meilleur coup.
+// Alpha-beta principle:
+//   We maintain a window [alpha, beta].
+//   - alpha: best score the active player is guaranteed to obtain
+//   - beta : best score the opponent is guaranteed to obtain
+//   If a move exceeds beta, the opponent would avoid it → we cut (beta cutoff).
+//   If a move improves alpha, we update the best move.
 //
-// Principal Variation Search (PVS) — principe détaillé :
-//   Un bon ordonnancement place le meilleur coup en premier dans la grande
-//   majorité des nœuds. On exploite cette propriété :
-//     - Coup n°1 (move_index == 0) : recherché à pleine fenêtre [alpha, beta].
-//       On a besoin de son score exact pour établir la vraie référence.
-//     - Coups suivants : d'abord sondés à fenêtre NULLE [-alpha-1, -alpha].
-//       Une fenêtre nulle ne demande qu'une réponse booléenne ("dépasse-t-il
-//       alpha ?"), ce qui génère beaucoup plus de coupures bêta internes
-//       qu'une fenêtre complète → arbre de recherche nettement plus petit.
-//       Si la sonde dépasse alpha, le coup est potentiellement meilleur que
-//       prévu : on le re-recherche à pleine fenêtre pour obtenir son score exact.
-//   Gain typique mesuré dans la littérature : 10-20 % de nœuds en moins par
-//   rapport à un alpha-bêta "naïf" qui rechercherait tous les coups à pleine
-//   fenêtre. Se combine naturellement avec LMR (la sonde à fenêtre nulle est
-//   aussi l'endroit où la réduction de profondeur s'applique).
+// Principal Variation Search (PVS) — detailed principle:
+//   Good ordering places the best move first in the vast
+//   majority of nodes. We exploit this property:
+//     - Move #1 (move_index == 0): searched with a full window [alpha, beta].
+//       We need its exact score to establish the true reference.
+//     - Subsequent moves: first probed with a NULL window [-alpha-1, -alpha].
+//       A null window only asks a boolean question ("does it exceed
+//       alpha?"), which generates far more internal beta cutoffs
+//       than a full window → a significantly smaller search tree.
+//       If the probe exceeds alpha, the move is potentially better than
+//       expected: it is re-searched with a full window to get its exact score.
+//   Typical gain measured in the literature: 10-20% fewer nodes
+//   compared to a "naive" alpha-beta that would search all moves with a full
+//   window. Combines naturally with LMR (the null-window probe is
+//   also where the depth reduction is applied).
 //
-// Singular Extension — principe détaillé :
-//   Un coup TT est "singulier" si, en l'excluant de la recherche, aucun autre
-//   coup ne peut atteindre un score proche du sien. Pour le vérifier, on lance
-//   une recherche à profondeur réduite (depth/2) avec le coup TT exclu et une
-//   fenêtre nulle juste sous son score. Si cette recherche échoue (fail-low),
-//   le coup est singulier et on l'explore un niveau de plus.
-//   Précaution : la recherche SE ne doit jamais être récursive (on vérifie
-//   excluded_move.is_null() avant de lancer SE).
+// Singular Extension — detailed principle:
+//   A TT move is "singular" if, when excluded from the search, no other
+//   move can reach a score close to its own. To check this, we launch
+//   a search at reduced depth (depth/2) with the TT move excluded and a
+//   null window just below its score. If this search fails (fail-low),
+//   the move is singular and we explore it one level deeper.
+//   Precaution: the SE search must never be recursive (we check
+//   excluded_move.is_null() before launching SE).
 //
-// Philosophie : clarté et correction avant optimisation.
-//   Chaque heuristique est clairement séparée et documentée.
+// Philosophy: clarity and correctness before optimization.
+//   Each heuristic is clearly separated and documented.
 // =============================================================================
 
 use std::sync::OnceLock;
@@ -75,62 +75,62 @@ use super::countermove::CountermoveTable;
 use super::continuation_history::ContinuationHistoryTable;
 use super::SearchInfo;
 use super::CorrKeys;
-// EVAL_HISTORY_NONE (défini dans search/mod.rs) sert de sentinelle "aucune
-// éval enregistrée à ce ply" pour la pile eval_history du drapeau "improving"
-// — voir le bloc "improving" détaillé dans alpha_beta().
+// EVAL_HISTORY_NONE (defined in search/mod.rs) serves as a sentinel "no
+// eval recorded at this ply" for the eval_history stack of the "improving" flag
+// — see the detailed "improving" block in alpha_beta().
 
-// Nombre maximum théorique de coups LÉGAUX dans une position d'échecs.
-// (position record : "R6R/3Q4/1Q4Q1/4Q3/2Q4Q/Q4Q2/pp1Q4/kBNN1KB1 w - - 0 1" → 218 coups)
-// Utilisé pour dimensionner les tableaux sur la pile indexés par coup légal
-// (`scores`, `lmp_pruned`) dans la boucle de coups.
+// Theoretical maximum number of LEGAL moves in a chess position.
+// (record position: "R6R/3Q4/1Q4Q1/4Q3/2Q4Q/Q4Q2/pp1Q4/kBNN1KB1 w - - 0 1" → 218 moves)
+// Used to size the stack arrays indexed by legal move
+// (`scores`, `lmp_pruned`) in the move loop.
 //
-// À ne pas confondre avec `moves::MAX_MOVE_LIST` (= 256) : ce dernier est la
-// CAPACITÉ d'une MoveList (tampon de pseudo-coups avant filtrage légal), volontairement
-// plus large et arrondie à une puissance de 2 pour la marge. Ici on indexe des coups
-// déjà filtrés LÉGAUX, dont le nombre est borné par ce maximum exact de 218.
+// Not to be confused with `moves::MAX_MOVE_LIST` (= 256): the latter is the
+// CAPACITY of a MoveList (buffer of pseudo-moves before legal filtering), deliberately
+// larger and rounded to a power of 2 for margin. Here we index moves
+// already filtered to LEGAL, whose count is bounded by this exact maximum of 218.
 const MAX_MOVES: usize = 218;
 
-// Profondeur maximale absolue de la recherche en plies depuis la racine.
+// Absolute maximum search depth in plies from the root.
 //
-// Borne de sécurité critique pour la Check Extension.
+// Critical safety bound for the Check Extension.
 //
-// Problème : la Check Extension ajoute +1 à la profondeur de l'enfant quand un coup
-// donne échec et que depth ≤ 4 :
-//   depth_enfant = depth - 1 + 1 = depth   (la profondeur NE DÉCROÎT PAS)
-// Si chaque coup de la branche donne échec, la récursion ne termine jamais.
+// Problem: the Check Extension adds +1 to the child's depth when a move
+// gives check and depth ≤ 4:
+//   child_depth = depth - 1 + 1 = depth   (depth DOES NOT DECREASE)
+// If every move in the branch gives check, the recursion never terminates.
 //
-// Correction : la condition d'extension inclut `ply + 1 < MAX_PLY`.
-// Au-delà de ce seuil, toute extension est désactivée → depth décroît normalement → terminaison garantie.
+// Fix: the extension condition includes `ply + 1 < MAX_PLY`.
+// Beyond this threshold, all extension is disabled → depth decreases normally → termination guaranteed.
 //
-// Valeur choisie : 128 (max_depth en mode infinite) + 64 niveaux d'extension = 192.
-// En pratique, les échecs perpétuels sont détectés bien avant (répétition de position).
-// Cette borne est un filet de sécurité absolu, jamais atteint sur des parties réelles.
+// Chosen value: 128 (max_depth in infinite mode) + 64 extension levels = 192.
+// In practice, perpetual checks are detected well before this (position repetition).
+// This bound is an absolute safety net, never reached in real games.
 //
-// Visibilité pub(crate) : killers.rs réutilise CETTE constante (au lieu d'en
-// définir une seconde) pour dimensionner sa table — corrige une incohérence
-// découverte lors d'un audit (killers.rs avait sa propre copie figée à 128,
-// soit moins que les 192 plies que la recherche peut théoriquement atteindre
-// avec les extensions ; au-delà de 128, les killer moves étaient silencieusement
-// désactivés). Une seule source de vérité évite que les deux valeurs divergent
-// à nouveau à l'avenir.
+// pub(crate) visibility: killers.rs reuses THIS constant (instead of
+// defining a second one) to size its table — fixes an inconsistency
+// discovered during an audit (killers.rs had its own copy fixed at 128,
+// which is less than the 192 plies the search can theoretically reach
+// with extensions; beyond 128, killer moves were silently
+// disabled). A single source of truth prevents the two values from diverging
+// again in the future.
 pub(crate) const MAX_PLY: usize = 128 + 64;
 
-// Profondeur maximale de la recherche de quiescence.
-// En pratique, le SEE filtre les captures perdantes et le stand-pat écrête la récursion,
-// mais une position pathologique avec de nombreuses captures gagnantes en chaîne pourrait
-// déborder la pile sans cette garde explicite. 64 niveaux = largement suffisant pour tout
-// échange concevable, sans coût notable (cas extrêmement rare).
-const MAX_QUIESCENCE_PLY: usize = MAX_PLY + 64; // MAX_PLY + 64 niveaux de quiescence
+// Maximum depth of the quiescence search.
+// In practice, SEE filters out losing captures and stand-pat cuts off the recursion,
+// but a pathological position with many winning captures chained together could
+// overflow the stack without this explicit guard. 64 levels = amply sufficient for any
+// conceivable exchange, at no noticeable cost (extremely rare case).
+const MAX_QUIESCENCE_PLY: usize = MAX_PLY + 64; // MAX_PLY + 64 quiescence levels
 
 // =============================================================================
-// Ordonnancement des coups
+// Move ordering
 // =============================================================================
 
-/// Score d'ordonnancement pour un coup (plus élevé = testé en premier).
-/// Un bon ordonnancement est crucial pour l'efficacité de l'alpha-bêta.
-// Nombre d'arguments volontairement élevé : l'ordonnancement combine plusieurs
-// heuristiques (TT, killers, history, countermove, continuation history), chacune
-// dans sa propre structure. Les regrouper masquerait la nature des dépendances.
+/// Ordering score for a move (higher = tried first).
+/// Good ordering is crucial to alpha-beta efficiency.
+// Deliberately large number of arguments: the ordering combines several
+// heuristics (TT, killers, history, countermove, continuation history), each
+// in its own structure. Grouping them would obscure the nature of the dependencies.
 #[allow(clippy::too_many_arguments)]
 fn move_score(
     board:        &Board,
@@ -143,37 +143,37 @@ fn move_score(
     prev_key:     Option<(Piece, u8)>,
     ply:          usize,
 ) -> i32 {
-    // 1. Coup de la table de transposition (meilleur coup connu) → priorité absolue
+    // 1. Transposition table move (best known move) → absolute priority
     if mv == tt_move && !tt_move.is_null() {
         return 2_000_000;
     }
 
-    // 2. Captures : évaluées par SEE (Static Exchange Evaluation).
-    //    SEE simule toute la séquence de captures sur la case cible et retourne
-    //    le gain net pour le camp qui capture.
-    //    - SEE ≥ 0 : capture gagnante ou neutre → priorité haute (1_000_000 + see)
-    //    - SEE < 0 : capture perdante → priorité très basse (négative)
-    //      Explorées après les coups silencieux, évitées en quiescence.
+    // 2. Captures: evaluated by SEE (Static Exchange Evaluation).
+    //    SEE simulates the entire sequence of captures on the target square and returns
+    //    the net gain for the capturing side.
+    //    - SEE ≥ 0: winning or neutral capture → high priority (1_000_000 + see)
+    //    - SEE < 0: losing capture → very low priority (negative)
+    //      Explored after quiet moves, avoided in quiescence.
     if mv.flags.is_capture() {
         let see_score = see(board, mv);
         return if see_score >= 0 {
-            1_000_000 + see_score   // Capture gagnante : avant les coups silencieux
+            1_000_000 + see_score   // Winning capture: before quiet moves
         } else {
-            see_score               // Capture perdante : après les coups silencieux
+            see_score               // Losing capture: after quiet moves
         };
     }
 
-    // 3. Promotions dame (sans capture)
+    // 3. Queen promotions (without capture)
     if mv.flags == MoveFlags::Promotion && mv.promotion == 4 {
         return 900_000;
     }
 
-    // 4. Killer moves (coups silencieux qui ont causé des coupures récemment).
-    //    Killer 1 (le plus récemment enregistré, voir KillerMoves::store) est
-    //    légèrement préféré à killer 2 : à enregistrement égal, le plus récent
-    //    est statistiquement le candidat le plus pertinent dans cette branche.
-    //    L'écart (10 points) est minime — juste assez pour les départager sans
-    //    jamais les faire chuter sous le seuil des promotions dame (900_000).
+    // 4. Killer moves (quiet moves that recently caused cutoffs).
+    //    Killer 1 (the most recently recorded, see KillerMoves::store) is
+    //    slightly preferred over killer 2: with equal recording, the most recent
+    //    is statistically the most relevant candidate in this branch.
+    //    The gap (10 points) is minimal — just enough to break ties without
+    //    ever making them fall below the queen promotions threshold (900_000).
     let km = killers.get(ply);
     if mv == km[0] {
         return 810_000;
@@ -182,21 +182,21 @@ fn move_score(
         return 800_000;
     }
 
-    // 5. Countermove : coup qui a déjà réfuté le dernier coup adverse joué
-    //    (même pièce + même case d'arrivée) ailleurs dans l'arbre. Placé
-    //    juste sous les killers : un signal plus spécifique que l'history
-    //    générique, mais moins établi qu'un killer testé À CE niveau précis.
+    // 5. Countermove: move that has already refuted the last move played by the
+    //    opponent (same piece + same destination square) elsewhere in the tree. Placed
+    //    just below killers: a more specific signal than generic
+    //    history, but less established than a killer tested AT this exact level.
     if let Some((prev_piece, prev_to)) = prev_key {
         if mv == countermoves.get(prev_piece, prev_to) {
             return 750_000;
         }
     }
 
-    // 6. Coups silencieux ordonnés par l'heuristique d'historique, enrichie
-    //    par la continuation history (contexte du dernier coup adverse) —
-    //    simple addition, pas un palier séparé : la continuation history
-    //    affine le score "history" existant plutôt que de créer une nouvelle
-    //    catégorie de priorité.
+    // 6. Quiet moves ordered by the history heuristic, enriched
+    //    by continuation history (context of the opponent's last move) —
+    //    a simple addition, not a separate tier: continuation history
+    //    refines the existing "history" score rather than creating a new
+    //    priority category.
     if let Some((piece, _)) = board.piece_at(mv.from) {
         let base = history.get(piece, mv.to);
         let cont = match prev_key {
@@ -209,45 +209,45 @@ fn move_score(
     0
 }
 
-/// Clé de hachage des pièces NON-PION (Cavalier..Roi) d'une couleur, pour
-/// indexer une table de Correction History. Mélange des bitboards concernés.
-/// Une collision d'index est sans conséquence de résultat : au pire une
-/// correction approximative (l'éval reste l'éval, seule une marge bouge).
+/// Hash key of the NON-PAWN pieces (Knight..King) of a color, for
+/// indexing a Correction History table. Mixing of the relevant bitboards.
+/// An index collision has no consequence on the result: at worst an
+/// approximate correction (the eval remains the eval, only a margin shifts).
 #[inline]
 fn nonpawn_key(board: &Board, color: Color) -> u64 {
-    // Multiplicateurs impairs distincts (constantes de mélange type splitmix).
+    // Distinct odd multipliers (splitmix-style mixing constants).
     const MULT: [u64; 6] = [
-        0,                      // Pion (exclu)
-        0xFF51_AFD7_ED55_8CCD,  // Cavalier
-        0xC4CE_B9FE_1A85_EC53,  // Fou
-        0x9E37_79B9_7F4A_7C15,  // Tour
-        0x2545_F491_4F6C_DD1D,  // Dame
-        0x1656_67B1_9E37_79F9,  // Roi
+        0,                      // Pawn (excluded)
+        0xFF51_AFD7_ED55_8CCD,  // Knight
+        0xC4CE_B9FE_1A85_EC53,  // Bishop
+        0x9E37_79B9_7F4A_7C15,  // Rook
+        0x2545_F491_4F6C_DD1D,  // Queen
+        0x1656_67B1_9E37_79F9,  // King
     ];
     let c = color.index();
     let mut h = 0u64;
-    // Chaque bitboard NON-PION mélangé par son multiplicateur. `.skip(1)` écarte
-    // les pions (index 0) ; on couvre ainsi Cavalier..Roi (index 1 à 5).
+    // Each NON-PAWN bitboard mixed by its multiplier. `.skip(1)` discards
+    // pawns (index 0); this covers Knight..King (index 1 to 5).
     for (bb, &mult) in board.pieces[c].iter().zip(MULT.iter()).skip(1) {
         h ^= bb.wrapping_mul(mult);
     }
     h ^ (h >> 31)
 }
 
-/// Construit les clés de Correction History d'un nœud (calculées UNE fois, puis
-/// réutilisées au site de lecture ET au site d'apprentissage). `prev_move` est
-/// le coup qui a mené à ce nœud (pour la table de continuation).
+/// Builds the Correction History keys for a node (computed ONCE, then
+/// reused at the read site AND the learning site). `prev_move` is
+/// the move that led to this node (for the continuation table).
 #[inline]
 fn corr_keys(board: &Board, prev_move: Move) -> CorrKeys {
-    // Clé de structure de pions (les deux bitboards de pions mélangés).
+    // Pawn structure key (the two pawn bitboards mixed together).
     let wp = board.pieces[Color::White.index()][Piece::Pawn.index()];
     let bp = board.pieces[Color::Black.index()][Piece::Pawn.index()];
     let mut hp = wp.wrapping_mul(0x9E37_79B9_7F4A_7C15);
     hp ^= bp.wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
     let pawn = hp ^ (hp >> 29);
 
-    // Index de continuation : (type de pièce, case d'arrivée) du dernier coup.
-    // Après make_move(prev_move), la pièce qui a bougé est SUR prev_move.to.
+    // Continuation index: (piece type, destination square) of the last move.
+    // After make_move(prev_move), the piece that moved is ON prev_move.to.
     let cont = if prev_move.is_null() {
         None
     } else if let Some((piece, _)) = board.piece_at(prev_move.to) {
@@ -265,38 +265,38 @@ fn corr_keys(board: &Board, prev_move: Move) -> CorrKeys {
     }
 }
 
-// order_moves() a été remplacée par un tri paresseux inliné dans alpha_beta().
-// Voir commentaire "Tri paresseux par sélection" dans alpha_beta().
+// order_moves() has been replaced by a lazy sort inlined in alpha_beta().
+// See the "Lazy selection sort" comment in alpha_beta().
 
 // =============================================================================
-// Late Move Reduction — table précalculée (zéro flottant à l'exécution)
+// Late Move Reduction — precomputed table (zero floating point at runtime)
 // =============================================================================
 
-/// Retourne la réduction LMR pour (depth, move_index) via une table précalculée.
+/// Returns the LMR reduction for (depth, move_index) via a precomputed table.
 ///
-/// Formule logarithmique standard (Stockfish-style), calculée UNE SEULE FOIS :
-///   réduction = max(1, floor(1 + ln(depth) × ln(move_index) / 2))
+/// Standard logarithmic formula (Stockfish-style), computed ONCE:
+///   reduction = max(1, floor(1 + ln(depth) × ln(move_index) / 2))
 ///
-/// La table est un tableau [64][64] de i32 initialisé via OnceLock au premier appel.
-/// Les indices hors-borne (depth > 63 ou move_index > 63) sont clampés à 63.
-/// La ligne/colonne 0 vaut 0 (ln(0) = -∞ → pas de réduction à profondeur/indice nul).
+/// The table is a [64][64] array of i32 initialized via OnceLock on first call.
+/// Out-of-bounds indices (depth > 63 or move_index > 63) are clamped to 63.
+/// Row/column 0 is 0 (ln(0) = -∞ → no reduction at zero depth/index).
 ///
-/// Exemples de valeurs :
-///   depth= 3, move_index= 3 → 1   (peu tardif, faible profondeur)
+/// Example values:
+///   depth= 3, move_index= 3 → 1   (not very late, low depth)
 ///   depth= 6, move_index= 6 → 2
 ///   depth=10, move_index=15 → 4
 ///   depth=15, move_index=20 → 5
 ///
-/// Gain : élimine deux appels f64::ln() + cast par nœud interne (millions de nœuds/s).
+/// Gain: eliminates two f64::ln() calls + cast per internal node (millions of nodes/s).
 #[inline]
 fn lmr_reduction(depth: i32, move_index: usize) -> i32 {
     static LMR_TABLE: OnceLock<[[i32; 64]; 64]> = OnceLock::new();
 
     let table = LMR_TABLE.get_or_init(|| {
         let mut t = [[0i32; 64]; 64];
-        // d=0 ou m=0 : ln(0) = -∞ → réduction 0 (pas appliqué en pratique)
-        // Boucle indexée volontaire : d ET m servent à la fois d'indices ET de
-        // valeurs dans la formule ln(d)·ln(m) — un itérateur serait moins clair.
+        // d=0 or m=0: ln(0) = -∞ → reduction 0 (not applied in practice)
+        // Deliberate indexed loop: d AND m serve both as indices AND as
+        // values in the ln(d)·ln(m) formula — an iterator would be less clear.
         #[allow(clippy::needless_range_loop)]
         for d in 1usize..64 {
             for m in 1usize..64 {
@@ -313,33 +313,33 @@ fn lmr_reduction(depth: i32, move_index: usize) -> i32 {
 }
 
 // =============================================================================
-// Late Move Pruning — seuil de coups par profondeur
+// Late Move Pruning — move threshold per depth
 // =============================================================================
 
-/// Profondeur maximale au-delà de laquelle le Late Move Pruning ne s'applique
-/// plus jamais : au-delà, le nombre de coups légaux dépasse de toute façon
-/// rarement le seuil ci-dessous, et le risque (élaguer un coup réellement bon)
-/// l'emporte sur le gain marginal.
+/// Maximum depth beyond which Late Move Pruning no longer ever
+/// applies: beyond that, the number of legal moves rarely exceeds
+/// the threshold below anyway, and the risk (pruning a genuinely good move)
+/// outweighs the marginal gain.
 const LMP_MAX_DEPTH: i32 = 8;
 
-/// Nombre de coups (toutes catégories confondues, mais en pratique presque
-/// toujours dépassé par des coups silencieux mal classés, les captures et
-/// killers étant ordonnés bien plus tôt) au-delà duquel un coup silencieux
-/// restant est élagué sans recherche à cette profondeur.
+/// Number of moves (across all categories, but in practice almost
+/// always exceeded by poorly-ranked quiet moves, since captures and
+/// killers are ordered much earlier) beyond which a remaining quiet
+/// move is pruned without search at this depth.
 ///
-/// Croissance quadratique : à profondeur 1, seuil très serré (peu de marge
-/// d'erreur acceptable) ; à profondeur LMP_MAX_DEPTH, le seuil dépasse le
-/// nombre de coups légaux dans l'immense majorité des positions réelles
-/// (le record théorique est 218, mais la moyenne réelle est de l'ordre de
-/// 30-40) — LMP devient alors un no-op naturel, sans cas particulier à coder.
+/// Quadratic growth: at depth 1, a very tight threshold (little margin
+/// for error acceptable); at depth LMP_MAX_DEPTH, the threshold exceeds the
+/// number of legal moves in the vast majority of real positions
+/// (the theoretical record is 218, but the real average is around
+/// 30-40) — LMP then becomes a natural no-op, with no special case to code.
 ///
-/// Ajustement "improving" (RÉACTIVÉ — le bug d'origine sur `eval_history`
-/// est corrigé, voir le bloc "improving" dans alpha_beta()) : le coefficient
-/// quadratique vaut 2 si la position s'améliore (on accorde DAVANTAGE de coups
-/// avant d'élaguer — une position en progression mérite un examen plus large),
-/// 1 sinon (on élague plus tôt, faute de raison de croire qu'un coup tardif
-/// sauve une position qui ne progresse pas). Même logique que le diviseur
-/// `(2 - improving)` des moteurs modernes.
+/// "Improving" adjustment (RE-ENABLED — the original bug on `eval_history`
+/// has been fixed, see the "improving" block in alpha_beta()): the quadratic
+/// coefficient is 2 if the position is improving (we grant MORE moves
+/// before pruning — an improving position deserves a broader look),
+/// 1 otherwise (we prune earlier, having no reason to believe a late move
+/// saves a position that isn't improving). Same logic as the
+/// `(2 - improving)` divisor of modern engines.
 #[inline]
 fn lmp_threshold(depth: i32, improving: bool) -> usize {
     let coeff = if improving { 2 } else { 1 };
@@ -347,31 +347,31 @@ fn lmp_threshold(depth: i32, improving: bool) -> usize {
 }
 
 // =============================================================================
-// Delta Pruning (futility pruning en quiescence)
+// Delta Pruning (futility pruning in quiescence)
 // =============================================================================
 
-/// Marge de sécurité ajoutée à l'estimation du gain matériel pour le delta
-/// pruning. Couvre l'écart entre la valeur matérielle brute d'une capture et
-/// l'évaluation complète de la position résultante (mobilité, structure de
-/// pions, sécurité du roi, etc., non comptées ici). Valeur standard utilisée
-/// par la plupart des moteurs : 150 à 200 cp. On retient 200 pour rester
-/// prudent (mieux vaut explorer un coup inutile que rater un coup utile).
+/// Safety margin added to the estimate of material gain for delta
+/// pruning. Covers the gap between the raw material value of a capture and
+/// the full evaluation of the resulting position (mobility, pawn
+/// structure, king safety, etc., not counted here). Standard value used
+/// by most engines: 150 to 200 cp. We keep 200 to stay
+/// cautious (better to explore a useless move than miss a useful one).
 const DELTA_MARGIN: i32 = 200;
 
-/// Estime le gain matériel maximal d'une capture, pour le delta pruning.
+/// Estimates the maximum material gain of a capture, for delta pruning.
 ///
-/// Valeur de la pièce capturée + gain de promotion éventuel (valeur de la
-/// nouvelle pièce moins celle du pion). C'est une borne SUPÉRIEURE du gain
-/// réel : le SEE tiendra compte des recaptures adverses, mais ici on veut
-/// seulement savoir si le MEILLEUR cas possible peut atteindre alpha — une
-/// borne supérieure suffit, et elle est bien moins coûteuse à calculer que
-/// le SEE complet (pas de simulation de la chaîne d'échanges).
+/// Value of the captured piece + any promotion gain (value of the
+/// new piece minus that of the pawn). This is an UPPER bound on the
+/// actual gain: SEE will account for opponent recaptures, but here we only
+/// want to know whether the BEST possible case can reach alpha — an
+/// upper bound is enough, and it is much cheaper to compute than
+/// the full SEE (no simulation of the exchange chain).
 ///
-/// Cas particuliers :
-///   - Prise en passant : la pièce capturée n'est pas sur `to` mais sur la
-///     case adjacente ; on sait que c'est toujours un pion adverse.
-///   - Promotion (avec ou sans capture) : on ajoute le gain net de la
-///     promotion (Dame − Pion par défaut, cf. promotion_piece()).
+/// Special cases:
+///   - En passant: the captured piece is not on `to` but on the
+///     adjacent square; we know it's always an enemy pawn.
+///   - Promotion (with or without capture): we add the net gain of the
+///     promotion (Queen − Pawn by default, cf. promotion_piece()).
 #[inline]
 fn capture_gain_estimate(board: &Board, mv: Move) -> i32 {
     let captured_value = if mv.flags == MoveFlags::EnPassant {
@@ -379,7 +379,7 @@ fn capture_gain_estimate(board: &Board, mv: Move) -> i32 {
     } else {
         match board.piece_at(mv.to) {
             Some((p, _)) => piece_value(p),
-            None => 0, // Ne devrait jamais arriver pour une capture légale.
+            None => 0, // Should never happen for a legal capture.
         }
     };
 
@@ -392,26 +392,26 @@ fn capture_gain_estimate(board: &Board, mv: Move) -> i32 {
 }
 
 // =============================================================================
-// Recherche de quiescence
+// Quiescence search
 // =============================================================================
 
-/// Recherche de quiescence : continue la recherche sur les coups "bruyants"
-/// (captures), plus les évasions complètes quand le camp au trait est en échec
-/// (voir « Gestion de l'échec » ci-dessous). Évite l'effet horizon (s'arrêter
-/// sur une position instable) — par exemple, ne pas évaluer une position où la
-/// dame vient d'être prise mais où on peut la reprendre au coup suivant.
+/// Quiescence search: continues the search on "noisy" moves
+/// (captures), plus full evasions when the side to move is in check
+/// (see "Check handling" below). Avoids the horizon effect (stopping
+/// on an unstable position) — for example, not evaluating a position where the
+/// queen has just been captured but could be recaptured on the next move.
 ///
-/// Gestion de l'échec : si le camp au trait est EN ÉCHEC à l'entrée, la
-/// fonction ne fait PAS de stand-pat (illégal — on ne peut pas passer) et
-/// recherche TOUTES les évasions légales (pas seulement les captures),
-/// détectant aussi le mat. Voir le bloc `in_check` en tête de fonction.
-/// La génération de coups silencieux DONNANT échec n'est, elle, pas faite
-/// (trop coûteuse — voir la note en fin de fonction).
+/// Check handling: if the side to move is IN CHECK on entry, the
+/// function does NOT do a stand-pat (illegal — passing is not allowed) and
+/// searches ALL legal evasions (not just captures),
+/// also detecting mate. See the `in_check` block at the start of the function.
+/// Generating quiet moves that GIVE check is, however, not done
+/// (too costly — see the note at the end of the function).
 ///
-/// La profondeur depuis la racine (`ply`) sert à la borne MAX_QUIESCENCE_PLY et
-/// aux scores de mat. La récursion est naturellement bornée (stand-pat + filtre
-/// SEE des captures, évasions limitées en échec) ; aucun compteur de profondeur
-/// propre à la quiescence n'est nécessaire.
+/// The depth from the root (`ply`) is used for the MAX_QUIESCENCE_PLY bound and
+/// for mate scores. The recursion is naturally bounded (stand-pat + SEE filter
+/// on captures, limited evasions when in check); no depth counter
+/// specific to quiescence is necessary.
 pub fn quiescence(
     board:     &mut Board,
     mut alpha: i32,
@@ -425,47 +425,47 @@ pub fn quiescence(
 
     info.nodes += 1;
 
-    // Mettre à jour la profondeur sélective maximale atteinte (seldepth UCI).
+    // Update the maximum selective depth reached (UCI seldepth).
     if ply as i32 > info.seldepth {
         info.seldepth = ply as i32;
     }
 
-    // Borne de profondeur de sécurité.
-    // Placée AVANT tout le reste pour borner AUSSI la branche "en échec"
-    // ci-dessous : une suite d'échecs et d'évasions n'avance pas via des
-    // captures et n'est pas détectée comme nulle par la quiescence (pas de
-    // détection de répétition ici) — cette garde garantit la terminaison et
-    // protège la pile dans les rares positions à échecs quasi perpétuels.
+    // Safety depth bound.
+    // Placed BEFORE everything else to ALSO bound the "in check" branch
+    // below: a sequence of checks and evasions does not progress via
+    // captures and is not detected as drawn by quiescence (no
+    // repetition detection here) — this guard guarantees termination and
+    // protects the stack in the rare positions with near-perpetual checks.
     if ply >= MAX_QUIESCENCE_PLY {
         return evaluate_opt(board, !info.toggles.disable_king_attack);
     }
 
-    // --- Cas particulier : le camp au trait est EN ÉCHEC ---
+    // --- Special case: the side to move is IN CHECK ---
     //
-    // RÉACTIVATION — forme professionnelle et sûre de "échecs en quiescence".
-    // L'ancienne tentative générait TOUS les coups légaux à CHAQUE feuille
-    // pour y chercher des coups silencieux donnant échec : prohibitif (chemin
-    // le plus chaud du moteur), d'où sa désactivation. On implémente ici la
-    // partie réellement importante et BIEN MOINS coûteuse — la gestion correcte
-    // de la position où le camp au trait est LUI-MÊME en échec.
+    // RE-ENABLED — a professional and safe form of "checks in quiescence".
+    // The old attempt generated ALL legal moves at EVERY leaf
+    // to look for quiet check-giving moves among them: prohibitive (the
+    // hottest path of the engine), hence its deactivation. Here we implement
+    // the genuinely important and MUCH LESS costly part — correctly
+    // handling the position where the side to move is ITSELF in check.
     //
-    // En échec, le "stand-pat" est illégal : on ne peut pas "passer", il faut
-    // répondre à l'échec. Évaluer une telle position comme calme (et couper sur
-    // stand_pat >= beta, ou ne regarder que les captures) est une ERREUR de
-    // CORRECTION : la vraie valeur peut être radicalement différente, jusqu'au
-    // mat. On génère donc TOUTES les évasions légales (fuite du roi,
-    // interpositions, capture du donneur d'échec — pas seulement les captures)
-    // et on les recherche. Coût maîtrisé : ce bloc ne se déclenche QUE sur les
-    // nœuds de quiescence réellement en échec (une faible fraction du total),
-    // contrairement à l'ancienne version active à chaque feuille.
+    // When in check, "stand-pat" is illegal: you cannot "pass", you must
+    // respond to the check. Evaluating such a position as calm (and cutting on
+    // stand_pat >= beta, or only looking at captures) is a CORRECTNESS
+    // ERROR: the true value can be radically different, up to
+    // mate. So we generate ALL legal evasions (king flight,
+    // interpositions, capturing the checking piece — not just captures)
+    // and search them. Controlled cost: this block triggers ONLY on
+    // quiescence nodes actually in check (a small fraction of the total),
+    // unlike the old version active at every leaf.
     let in_check = is_in_check(board, board.side_to_move);
     if in_check {
-        // Évasions générées sur la pile (zéro allocation tas).
+        // Evasions generated on the stack (zero heap allocation).
         let mut evasions = MoveList::new();
         generate_legal_moves_into(board, &mut evasions);
         if evasions.is_empty() {
-            // Aucune évasion légale → échec et mat. Score de mat ajusté à la
-            // distance (mats rapides préférés), cohérent avec alpha_beta().
+            // No legal evasion → checkmate. Mate score adjusted to the
+            // distance (faster mates preferred), consistent with alpha_beta().
             return -(SCORE_MATE - ply as i32);
         }
         for &mv in evasions.iter() {
@@ -474,7 +474,7 @@ pub fn quiescence(
             board.unmake_move(mv);
 
             if score >= beta {
-                return beta;        // coupure bêta (fail-hard, comme le reste du fichier)
+                return beta;        // beta cutoff (fail-hard, like the rest of the file)
             }
             if score > alpha {
                 alpha = score;
@@ -483,9 +483,9 @@ pub fn quiescence(
         return alpha;
     }
 
-    // Score de la position sans jouer de coup (stand pat).
-    // (À partir d'ici, le camp au trait n'est PAS en échec.)
-    // Si ce score dépasse bêta, l'adversaire éviterait cette branche.
+    // Score of the position without playing a move (stand pat).
+    // (From here on, the side to move is NOT in check.)
+    // If this score exceeds beta, the opponent would avoid this branch.
     let stand_pat = evaluate_opt(board, !info.toggles.disable_king_attack);
 
     if stand_pat >= beta {
@@ -496,28 +496,28 @@ pub fn quiescence(
         alpha = stand_pat;
     }
 
-    // Générer les captures, les évaluer par SEE et trier (meilleures en premier).
-    // Élagage SEE : les captures perdantes (SEE < 0) sont ignorées en quiescence.
-    // Justification : en quiescence on cherche à stabiliser la position ; une
-    // capture perdante aggrave la situation et ne vaut pas la peine d'être explorée.
+    // Generate captures, evaluate them with SEE, and sort them (best first).
+    // SEE pruning: losing captures (SEE < 0) are ignored in quiescence.
+    // Rationale: in quiescence we seek to stabilize the position; a
+    // losing capture worsens the situation and isn't worth exploring.
     let mut raw_captures = MoveList::new();
     generate_legal_captures_into(board, &mut raw_captures);
 
-    // Précalculer les scores SEE pour éviter les appels redondants (tri + filtre).
+    // Precompute SEE scores to avoid redundant calls (sort + filter).
     //
-    // Delta Pruning (futility en quiescence) — appliqué AVANT le calcul du SEE :
-    //   Si stand_pat + gain_maximal_possible + marge ≤ alpha, ce coup ne peut
-    //   structurellement pas améliorer la position, même dans le meilleur cas
-    //   (capture réussie sans la moindre recapture adverse). On l'élimine sans
-    //   même calculer son SEE — qui simule toute la chaîne d'échanges et coûte
-    //   nettement plus cher qu'une simple lecture de piece_value().
-    //   Gain attendu : moins de nœuds de quiescence explorés en fin de partie
-    //   ou dans les positions très déséquilibrées, sans perte de précision
-    //   (le coup éliminé ne pouvait de toute façon pas changer le résultat).
-    // Captures retenues + leur score SEE, stockées sur la PILE (tableau fixe,
-    // parallèle aux coups) au lieu d'un Vec<(Move,i32)> alloué sur le tas à
-    // chaque nœud de quiescence — le chemin le plus chaud du moteur.
-    // `n` ≤ raw_captures.len() ≤ MAX_MOVE_LIST : aucun débordement possible.
+    // Delta Pruning (futility in quiescence) — applied BEFORE computing SEE:
+    //   If stand_pat + max_possible_gain + margin ≤ alpha, this move cannot
+    //   structurally improve the position, even in the best case
+    //   (successful capture without any opponent recapture at all). We discard it without
+    //   even computing its SEE — which simulates the entire exchange chain and costs
+    //   noticeably more than a simple piece_value() lookup.
+    //   Expected gain: fewer quiescence nodes explored in the endgame
+    //   or in highly unbalanced positions, without loss of accuracy
+    //   (the discarded move could not have changed the result anyway).
+    // Retained captures + their SEE score, stored on the STACK (fixed array,
+    // parallel to the moves) instead of a Vec<(Move,i32)> allocated on the heap
+    // at each quiescence node — the hottest path of the engine.
+    // `n` ≤ raw_captures.len() ≤ MAX_MOVE_LIST: no overflow possible.
     let mut scored: [(Move, i32); MAX_MOVE_LIST] = [(Move::NULL, 0); MAX_MOVE_LIST];
     let mut n = 0usize;
     for &mv in raw_captures.iter() {
@@ -529,12 +529,12 @@ pub fn quiescence(
         n += 1;
     }
 
-    // Trier par score SEE décroissant : meilleures captures en premier.
+    // Sort by descending SEE score: best captures first.
     scored[..n].sort_unstable_by_key(|entry| std::cmp::Reverse(entry.1));
 
     for &(mv, see_score) in scored[..n].iter() {
-        // Ignorer les captures perdantes (SEE < 0).
-        // Comme la tranche est triée, dès qu'on voit SEE < 0 on peut arrêter.
+        // Skip losing captures (SEE < 0).
+        // Since the slice is sorted, as soon as we see SEE < 0 we can stop.
         if see_score < 0 {
             break;
         }
@@ -551,53 +551,53 @@ pub fn quiescence(
         }
     }
 
-    // Note : la GÉNÉRATION de coups silencieux donnant échec (le camp au trait
-    // DONNE échec sans capturer) n'est volontairement PAS faite ici — c'est ce
-    // qui rendait l'ancienne version prohibitive (generate_legal_moves() à
-    // chaque feuille). La gestion des positions où le camp au trait SUBIT un
-    // échec, elle, est traitée en tête de fonction (voir le bloc `in_check`),
-    // pour un coût bien moindre et un gain de correction réel. Réintroduire la
-    // génération de contre-échecs silencieux nécessiterait une détection d'échec
-    // bon marché (sans regénérer tous les coups) ET un banc d'essai NPS/Elo —
-    // à réserver à une itération ultérieure mesurée.
+    // Note: the GENERATION of quiet moves giving check (the side to move
+    // GIVES check without capturing) is deliberately NOT done here — this is what
+    // made the old version prohibitive (generate_legal_moves() at
+    // every leaf). Handling of positions where the side to move IS IN
+    // check, on the other hand, is handled at the top of the function (see the `in_check` block),
+    // for a much lower cost and a real correctness gain. Reintroducing the
+    // generation of quiet counter-checks would require cheap check
+    // detection (without regenerating all moves) AND an NPS/Elo benchmark —
+    // to be left for a later, measured iteration.
 
     alpha
 }
 
 // =============================================================================
-// Facteur de contempt
+// Contempt factor
 // =============================================================================
 
-/// Retourne le score d'une position nulle (50 coups, répétition, matériel
-/// insuffisant, pat — toutes causes confondues), ajusté par le contempt
-/// configuré via l'option UCI "Contempt" (`info.contempt`, 0 par défaut =
-/// comportement inchangé, exactement SCORE_DRAW).
+/// Returns the score of a drawn position (50-move rule, repetition, insufficient
+/// material, stalemate — all causes combined), adjusted by the contempt
+/// configured via the UCI option "Contempt" (`info.contempt`, 0 by default =
+/// unchanged behavior, exactly SCORE_DRAW).
 ///
-/// Principe : le contempt exprime "une nullité est légèrement DÉFAVORABLE
-/// du point de vue du camp que le moteur joue actuellement" (utile contre
-/// un adversaire plus faible — pas la peine de se contenter d'un partage
-/// des points). Ce camp est TOUJOURS celui au trait à la racine de la
-/// recherche en cours (ply == 0), puisque "go" n'est appelé que lorsque
-/// c'est au moteur de jouer.
+/// Principle: contempt expresses "a draw is slightly UNFAVORABLE
+/// from the point of view of the side the engine is currently playing" (useful against
+/// a weaker opponent — no point settling for a
+/// split of the points). This side is ALWAYS the one to move at the root of the
+/// current search (ply == 0), since "go" is only called when
+/// it is the engine's turn to play.
 ///
-/// Dérivation de la parité : chaque niveau de recherche renvoie un score du
-/// point de vue du camp au trait À CE NŒUD, puis le négamax l'inverse à
-/// chaque remontée d'un ply. Le camp alterne à chaque ply, donc le nombre
-/// d'inversions entre ce nœud et la racine est exactement `ply`. Pour que
-/// la racine perçoive toujours `-contempt` (légèrement défavorable, quel
-/// que soit l'endroit de l'arbre où la nullité est détectée) :
-///   - ply pair   → ce nœud EST le camp racine → renvoyer directement `-contempt`
-///     (un nombre pair d'inversions ne change pas le signe)
-///   - ply impair → ce nœud est l'ADVERSAIRE du camp racine → renvoyer
-///     `+contempt`, qui devient `-contempt` après l'inversion impaire
+/// Derivation of parity: each search level returns a score from the
+/// point of view of the side to move AT THIS NODE, then negamax flips it at
+/// each ply unwind. The side alternates at each ply, so the number
+/// of flips between this node and the root is exactly `ply`. For
+/// the root to always perceive `-contempt` (slightly unfavorable, regardless
+/// of where in the tree the draw is detected):
+///   - even ply   → this node IS the root side → return `-contempt` directly
+///     (an even number of flips does not change the sign)
+///   - odd ply → this node is the OPPONENT of the root side → return
+///     `+contempt`, which becomes `-contempt` after the odd flip
 ///
-/// IMPORTANT — cohérence multi-thread : la table de transposition est
-/// PARTAGÉE entre tous les threads Lazy SMP. Si un thread appliquait le
-/// contempt et un autre non, les scores de nullité mis en cache seraient
-/// incohérents selon le thread qui les a calculés. `info.contempt` doit
-/// donc être identique sur TOUS les threads d'une même recherche — voir
-/// SearchEngine::search() qui le copie sur le thread principal ET sur
-/// chaque thread secondaire depuis la même SearchConfig.
+/// IMPORTANT — multi-thread consistency: the transposition table is
+/// SHARED among all Lazy SMP threads. If one thread applied
+/// contempt and another did not, the cached draw scores would be
+/// inconsistent depending on which thread computed them. `info.contempt` must
+/// therefore be identical on ALL threads of a given search — see
+/// SearchEngine::search() which copies it to the main thread AND to
+/// each secondary thread from the same SearchConfig.
 #[inline]
 fn draw_score(contempt: i32, ply: usize) -> i32 {
     if contempt == 0 {
@@ -607,42 +607,42 @@ fn draw_score(contempt: i32, ply: usize) -> i32 {
 }
 
 // =============================================================================
-// Recherche alpha-bêta principale
+// Main alpha-beta search
 // =============================================================================
 
-/// Recherche alpha-bêta avec toutes les heuristiques de Vendetta Chess Motor.
+/// Alpha-beta search with all the heuristics of Vendetta Chess Motor.
 ///
-/// Paramètres :
-///   - board         : position courante (modifiée puis restaurée)
-///   - depth         : profondeur restante à explorer
-///   - alpha         : borne inférieure (meilleur score assuré pour le joueur actif)
-///   - beta          : borne supérieure (meilleur score assuré pour l'adversaire)
-///   - ply           : distance depuis la racine (0 = racine)
-///   - tt            : table de transposition partagée (mutabilité intérieure)
-///   - killers       : heuristique des killer moves
-///   - history       : heuristique d'historique
-///   - countermoves  : heuristique countermove (coup de réfutation)
-///   - prev_move     : dernier coup joué pour atteindre ce nœud (celui que
-///                     countermoves cherche éventuellement à réfuter).
-///                     Move::NULL à la racine ou après un coup nul (Null
-///                     Move Pruning) — dans ce cas, aucun lookup countermove
-///                     n'est effectué pour les enfants de ce nœud.
-///   - cont_history  : continuation history (généralisation cumulative du
-///                     countermove) — utilise la même clé prev_key.
-///   - info          : statistiques de recherche et signal d'arrêt
-///   - excluded_move : coup à exclure de la recherche.
-///                     Toujours Move::NULL dans les appels normaux.
-///                     Uniquement non-NULL dans la recherche de vérification
-///                     de la Singular Extension.
-///   - root_moves    : coups pré-filtrés pour la racine (searchmoves UCI).
-///                     Vide (&[]) dans tous les appels récursifs internes.
-///                     Non-vide uniquement à ply==0 depuis search() : élimine
-///                     generate_legal_moves() ET les allocations to_uci() à la racine.
-// Nombre d'arguments volontairement élevé : c'est la fonction de recherche
-// centrale, qui propage l'état partagé (TT, heuristiques, contexte) à travers
-// toute la récursion. Les regrouper dans une struct nuirait à la lisibilité des
-// appels récursifs. L'alignement manuel de la doc des paramètres est, lui aussi,
-// délibéré (préféré au reformatage automatique).
+/// Parameters:
+///   - board         : current position (modified then restored)
+///   - depth         : remaining depth to explore
+///   - alpha         : lower bound (best score guaranteed for the side to move)
+///   - beta          : upper bound (best score guaranteed for the opponent)
+///   - ply           : distance from the root (0 = root)
+///   - tt            : shared transposition table (interior mutability)
+///   - killers       : killer moves heuristic
+///   - history       : history heuristic
+///   - countermoves  : countermove heuristic (refutation move)
+///   - prev_move     : last move played to reach this node (the one that
+///                     countermoves may attempt to refute).
+///                     Move::NULL at the root or after a null move (Null
+///                     Move Pruning) — in this case, no countermove lookup
+///                     is performed for the children of this node.
+///   - cont_history  : continuation history (cumulative generalization of
+///                     countermove) — uses the same prev_key key.
+///   - info          : search statistics and stop signal
+///   - excluded_move : move to exclude from the search.
+///                     Always Move::NULL in normal calls.
+///                     Only non-NULL in the Singular Extension
+///                     verification search.
+///   - root_moves    : pre-filtered moves for the root (UCI searchmoves).
+///                     Empty (&[]) in all internal recursive calls.
+///                     Non-empty only at ply==0 from search(): eliminates
+///                     generate_legal_moves() AND to_uci() allocations at the root.
+// Deliberately high number of arguments: this is the central search
+// function, which propagates shared state (TT, heuristics, context) throughout
+// the whole recursion. Grouping them into a struct would harm the readability of the
+// recursive calls. The manual alignment of the parameter doc is, likewise,
+// deliberate (preferred over automatic reformatting).
 #[allow(clippy::too_many_arguments, clippy::doc_overindented_list_items)]
 pub fn alpha_beta(
     board:         &mut Board,
@@ -660,7 +660,7 @@ pub fn alpha_beta(
     excluded_move: Move,
     root_moves:    &[Move],
 ) -> i32 {
-    // --- Arrêt anticipé ---
+    // --- Early stop ---
     info.check_time();
     if info.should_stop() {
         return 0;
@@ -668,54 +668,54 @@ pub fn alpha_beta(
 
     info.nodes += 1;
 
-    // --- Détection de position nulle ---
+    // --- Draw position detection ---
 
-    // Règle des 50 coups
+    // 50-move rule
     if board.halfmove_clock >= 100 {
         return draw_score(info.contempt, ply);
     }
 
-    // Nulle par répétition (via hash Zobrist)
+    // Draw by repetition (via Zobrist hash)
     //
-    // Correction — ordre des adaptateurs : .skip(1).step_by(2), pas l'inverse.
-    //   L'ancienne version (.step_by(2).skip(1)) vérifiait les positions aux rangs
-    //   3, 5, 7… demi-coups en arrière, c'est-à-dire les positions du TRAIT ADVERSE.
-    //   Le hash Zobrist encode le trait → elles ne peuvent jamais correspondre
-    //   au hash courant → la détection était silencieusement non-fonctionnelle.
+    // Fix — adapter order: .skip(1).step_by(2), not the reverse.
+    //   The old version (.step_by(2).skip(1)) checked positions at ranks
+    //   3, 5, 7… half-moves back, i.e. the positions of the OPPONENT'S turn.
+    //   The Zobrist hash encodes the side to move → they can never match
+    //   the current hash → the detection was silently non-functional.
     //
-    //   Séquence correcte :
-    //     .skip(1)    — ignore la position 1 demi-coup en arrière (trait adverse)
-    //     .step_by(2) — de 2 en 2 : positions 2, 4, 6… demi-coups en arrière
-    //                   (même trait que la position courante, garantie par le Zobrist)
+    //   Correct sequence:
+    //     .skip(1)    — skip the position 1 half-move back (opponent's turn)
+    //     .step_by(2) — every 2: positions 2, 4, 6… half-moves back
+    //                   (same side to move as the current position, guaranteed by the Zobrist)
     //
-    // Optimisation — .any() remplace .count() >= 2.
-    //   En recherche alpha-bêta, une seule répétition antérieure suffit à déclarer
-    //   nulle (l'adversaire peut toujours forcer la répétition au coup suivant).
-    //   .any() sort immédiatement à la première correspondance : O(1) en cas
-    //   de répétition, au lieu de continuer jusqu'à halfmove_clock/2 entrées.
+    // Optimization — .any() replaces .count() >= 2.
+    //   In alpha-beta search, a single prior repetition is enough to declare
+    //   a draw (the opponent can always force the repetition on the next move).
+    //   .any() exits immediately on the first match: O(1) in case
+    //   of repetition, instead of continuing up to halfmove_clock/2 entries.
     if ply > 0 && board.history.len() >= 2 {
         let current_hash  = board.hash;
         let is_repetition = board.history.iter().rev()
-            .skip(1)                                     // sauter la pos. 1 ply en arrière (trait adverse)
-            .step_by(2)                                  // même trait que la pos. courante
-            .take(board.halfmove_clock as usize / 2)     // borné par la règle des 50 coups
-            .any(|s| s.hash == current_hash);            // sortie dès la 1re occurrence
+            .skip(1)                                     // skip the pos. 1 ply back (opponent's turn)
+            .step_by(2)                                  // same side to move as the current pos.
+            .take(board.halfmove_clock as usize / 2)     // bounded by the 50-move rule
+            .any(|s| s.hash == current_hash);            // exit on the 1st occurrence
         if is_repetition {
             return draw_score(info.contempt, ply);
         }
     }
 
-    // Matériel insuffisant pour mater
+    // Insufficient material to mate
     if is_insufficient_material(board) {
         return draw_score(info.contempt, ply);
     }
 
-    // --- Sonde de la table de transposition ---
+    // --- Transposition table probe ---
     //
-    // Important : si un coup est exclu (recherche de vérification SE), on NE fait
-    // PAS de cutoff TT. Le score stocké en TT a été calculé sans exclusion : il
-    // tient compte du coup exclu et serait incorrect ici.
-    // En revanche, on récupère quand même tt_move pour l'ordonnancement des coups.
+    // Important: if a move is excluded (SE verification search), we do NOT do
+    // a TT cutoff. The score stored in the TT was computed without exclusion: it
+    // accounts for the excluded move and would be incorrect here.
+    // However, we still retrieve tt_move for move ordering.
     let tt_entry_opt = tt.probe(board.hash);
     let tt_move = match tt_entry_opt {
         Some(ref entry) => {
@@ -725,7 +725,7 @@ pub fn alpha_beta(
                 );
                 match entry.flag {
                     TTFlag::Exact => {
-                        // Score exact : on peut retourner directement (sauf à la racine)
+                        // Exact score: we can return directly (except at the root)
                         if ply > 0 { return score; }
                     }
                     TTFlag::LowerBound => {
@@ -743,28 +743,28 @@ pub fn alpha_beta(
 
     // --- Mate Distance Pruning ---
     //
-    // Resserre directement [alpha, beta] aux scores de mat atteignables
-    // depuis CE nœud, compte tenu de sa profondeur (ply) — sans dépendre
-    // d'aucune heuristique ni marge approximative, juste de l'arithmétique
-    // exacte des scores de mat. Technique gratuite et sans aucun risque
-    // tactique (contrairement à RFP/Razoring/LMP) : si elle coupe, c'est
-    // une certitude logique, pas un pari.
+    // Directly tighten [alpha, beta] to the mate scores reachable
+    // from THIS node, given its depth (ply) — without relying on
+    // any heuristic or approximate margin, just the exact
+    // arithmetic of mate scores. A free technique with no
+    // tactical risk (unlike RFP/Razoring/LMP): if it cuts, it's
+    // a logical certainty, not a gamble.
     //
-    //   - Meilleur cas : mater l'adversaire au coup suivant (ply+1, un coup
-    //     de plus que ce nœud) → SCORE_MATE - (ply+1). Si bêta dépasse déjà
-    //     cette borne, on l'abaisse : aucun coup ne peut faire mieux qu'un
-    //     mat immédiat.
-    //   - Pire cas : être maté À ce nœud même (ply) → -SCORE_MATE + ply. Si
-    //     alpha est déjà sous cette borne, on le relève : rien de pire ne
-    //     peut nous arriver ici qu'un mat immédiat contre nous.
-    //   - Si la fenêtre s'effondre (alpha >= bêta) après resserrement, la
-    //     position est déjà entièrement déterminée par la distance de mat
-    //     seule : on retourne sans générer un seul coup.
+    //   - Best case: mate the opponent on the next move (ply+1, one move
+    //     more than this node) → SCORE_MATE - (ply+1). If beta already exceeds
+    //     this bound, we lower it: no move can do better than an
+    //     immediate mate.
+    //   - Worst case: being mated AT this very node (ply) → -SCORE_MATE + ply. If
+    //     alpha is already below this bound, we raise it: nothing worse
+    //     can happen to us here than an immediate mate against us.
+    //   - If the window collapses (alpha >= beta) after tightening, the
+    //     position is already entirely determined by mate distance
+    //     alone: we return without generating a single move.
     //
-    // Placée après la sonde TT (qui peut déjà couper plus tôt dans le cas
-    // général) et avant le dispatch vers la quiescence — s'applique donc
-    // uniformément à TOUS les nœuds, y compris ceux sur le point de plonger
-    // en profondeur 0.
+    // Placed after the TT probe (which can already cut earlier in the
+    // general case) and before dispatching to quiescence — it thus applies
+    // uniformly to ALL nodes, including those about to dive
+    // into depth 0.
     let mate_score_for_us     = SCORE_MATE - (ply as i32 + 1);
     let mate_score_against_us = -SCORE_MATE + ply as i32;
     if beta  > mate_score_for_us     { beta  = mate_score_for_us; }
@@ -773,25 +773,25 @@ pub fn alpha_beta(
         return alpha;
     }
 
-    // --- Nœud feuille : recherche de quiescence ---
+    // --- Leaf node: quiescence search ---
     if depth <= 0 {
         return quiescence(board, alpha, beta, ply, info);
     }
 
     let in_check = is_in_check(board, board.side_to_move);
 
-    // Clé countermove du nœud courant : (pièce, case d'arrivée) du dernier
-    // coup joué pour ATTEINDRE ce nœud (déjà appliqué sur `board`). None si
-    // aucun coup précédent n'est tracé (racine, ou enfant d'un coup nul).
-    // board.piece_at(prev_move.to) lit l'état ACTUEL du plateau, qui reflète
-    // déjà ce coup — aucune information supplémentaire à propager à part
-    // le Move lui-même.
+    // Countermove key of the current node: (piece, destination square) of the last
+    // move played to REACH this node (already applied on `board`). None if
+    // no previous move is tracked (root, or child of a null move).
+    // board.piece_at(prev_move.to) reads the CURRENT state of the board, which already
+    // reflects this move — no additional information to propagate besides
+    // the Move itself.
     //
-    // CORRIGÉ (audit robustesse, point 2) : pour une promotion, piece_at()
-    // lirait la pièce APRÈS promotion (ex: Dame) plutôt que la pièce qui a
-    // réellement joué le coup (un Pion — par définition, aucune autre pièce
-    // ne peut promouvoir). Cas particulier explicite, sans avoir besoin de
-    // relire le plateau ni de propager une information supplémentaire.
+    // FIXED (robustness audit, point 2): for a promotion, piece_at()
+    // would read the piece AFTER promotion (e.g. Queen) rather than the piece that
+    // actually made the move (a Pawn — by definition, no other piece
+    // can promote). Explicit special case, without needing to
+    // re-read the board or propagate extra information.
     let prev_key: Option<(Piece, u8)> = if !prev_move.is_null() {
         if prev_move.flags.is_promotion() {
             Some((Piece::Pawn, prev_move.to))
@@ -802,18 +802,18 @@ pub fn alpha_beta(
         None
     };
 
-    // Évaluation statique calculée une seule fois et partagée entre le
-    // Reverse Futility Pruning et le Razoring ci-dessous (avant, evaluate()
-    // était appelé une seconde fois dans le bloc Razoring — redondant).
+    // Static evaluation computed once and shared between the
+    // Reverse Futility Pruning and Razoring below (previously, evaluate()
+    // was called a second time in the Razoring block — redundant).
     //
-    // Désactivée (skip = None) si les conditions communes aux deux techniques
-    // ne sont pas réunies : en échec, à la racine, ou en recherche SE
-    // (Singular Extension — excluded_move non nul). Ces trois cas rendent
-    // l'évaluation statique non pertinente ou les coupes dangereuses.
-    // Clés de Correction History du nœud, calculées UNE SEULE FOIS ici puis
-    // réutilisées au site d'apprentissage (en fin de fonction). None si la
-    // correction n'a pas lieu d'être (mêmes conditions que static_eval_opt) ou
-    // si l'interrupteur runtime la désactive (tests SPRT).
+    // Disabled (skip = None) if the conditions common to both techniques
+    // are not met: in check, at the root, or in an SE search
+    // (Singular Extension — excluded_move non-null). These three cases make
+    // the static evaluation irrelevant or the cuts dangerous.
+    // Node's Correction History keys, computed ONCE here and then
+    // reused at the learning site (at the end of the function). None if the
+    // correction does not apply (same conditions as static_eval_opt), or
+    // if the runtime switch disables it (SPRT tests).
     let corr_keys_opt = if !in_check && ply > 0 && excluded_move.is_null() && !info.toggles.disable_correction {
         Some(corr_keys(board, prev_move))
     } else {
@@ -821,14 +821,14 @@ pub fn alpha_beta(
     };
 
     let static_eval_opt = if !in_check && ply > 0 && excluded_move.is_null() {
-        // Éval statique CORRIGÉE par la Correction History (⚠️ à valider SPRT) :
-        // on ajoute la correction apprise (moyenne pondérée de plusieurs tables :
-        // pions, pièces non-pion par couleur, continuation). TOUT l'élagage en
-        // aval (RFP, Razoring, NMP, futility) et le drapeau `improving` utilisent
-        // cette éval corrigée — une éval mieux calibrée affine les marges de coupe.
+        // Static eval CORRECTED by the Correction History (⚠️ to be validated via SPRT):
+        // we add the learned correction (weighted average of several tables:
+        // pawns, non-pawn pieces by color, continuation). ALL downstream
+        // pruning (RFP, Razoring, NMP, futility) and the `improving` flag use
+        // this corrected eval — a better-calibrated eval refines the cut margins.
         let raw_eval = evaluate_opt(board, !info.toggles.disable_king_attack);
-        // corr_keys_opt = None ⇒ correction désactivée (toggle) ou non pertinente :
-        // l'éval reste BRUTE.
+        // corr_keys_opt = None ⇒ correction disabled (toggle) or not applicable:
+        // the eval remains RAW.
         let correction = match &corr_keys_opt {
             Some(keys) => info.correction_history.value(keys),
             None => 0,
@@ -838,52 +838,52 @@ pub fn alpha_beta(
         None
     };
 
-    // --- Pile d'évaluations statiques par ply + drapeau "improving" ---
+    // --- Stack of static evaluations per ply + "improving" flag ---
     //
-    // (RÉACTIVÉ — le bug qui avait fait désactiver cette feature est corrigé,
-    // voir ci-dessous.)
+    // (RE-ENABLED — the bug that had caused this feature to be disabled is fixed,
+    // see below.)
     //
-    // "improving" répond à : la position du camp au trait est-elle MEILLEURE
-    // qu'il y a 2 plies ? (Le trait alterne à chaque ply ; ply et ply-2 sont
-    // donc toujours le MÊME camp au trait, comparaison d'évals directe et
-    // valide.) Si oui, on fait davantage confiance aux scores : RFP coupe un
-    // peu plus facilement, NMP réduit un peu plus, LMP élague un peu moins vite.
+    // "improving" answers: is the position of the side to move BETTER
+    // than 2 plies ago? (The side to move alternates every ply; ply and ply-2 are
+    // therefore always the SAME side to move, a direct and valid
+    // eval comparison.) If so, we trust the scores more: RFP cuts a
+    // bit more easily, NMP reduces a bit more, LMP prunes a bit less aggressively.
     //
-    // CORRECTIF DU BUG D'ORIGINE — l'ancienne version n'écrivait
-    // eval_history[ply] QUE lorsqu'une éval statique était disponible (donc
-    // PAS en échec). Un nœud en échec laissait alors à cet index la valeur
-    // d'une AUTRE branche explorée plus tôt au même ply ; un descendant à
-    // ply+2 la lisait comme si c'était celle de son propre grand-parent →
-    // décision d'élagage fondée sur une position sans rapport.
+    // FIX FOR THE ORIGINAL BUG — the old version only wrote
+    // eval_history[ply] when a static eval was available (i.e.
+    // NOT in check). A node in check would then leave at this index the value
+    // of ANOTHER branch explored earlier at the same ply; a descendant at
+    // ply+2 would read it as if it were its own grandparent's value →
+    // a pruning decision based on an unrelated position.
     //
-    // Le correctif : écrire eval_history[ply] à CHAQUE visite réelle du nœud,
-    // INCONDITIONNELLEMENT — la vraie éval si disponible, sinon la sentinelle
-    // EVAL_HISTORY_NONE (en échec, racine). Invariant alors garanti : pendant
-    // l'exploration du sous-arbre d'un nœud à ply P, eval_history[P] contient
-    // toujours exactement ce que CE nœud y a écrit. (Ses descendants n'écrivent
-    // qu'aux index >= P+1 ; ses frères déjà explorés sont retournés, et leurs
-    // écritures à des index >= P+1 n'altèrent jamais l'index P.) Donc lire
-    // eval_history[ply-2] renvoie TOUJOURS l'éval de l'ancêtre situé 2 plies
-    // plus haut sur LE chemin courant — jamais celle d'une autre branche.
-    // Quand cet ancêtre était en échec (sentinelle), improving = false (réglage
-    // le plus prudent). C'est la technique des moteurs modernes (la pile
-    // ss->staticEval de Stockfish).
+    // The fix: write eval_history[ply] on EVERY actual visit to the node,
+    // UNCONDITIONALLY — the real eval if available, otherwise the sentinel
+    // EVAL_HISTORY_NONE (in check, root). The invariant is then guaranteed: during
+    // the exploration of a node's subtree at ply P, eval_history[P] contains
+    // always exactly what THIS node wrote there. (Its descendants only write
+    // at indices >= P+1; its siblings already explored have returned, and their
+    // writes at indices >= P+1 never alter index P.) So reading
+    // eval_history[ply-2] ALWAYS returns the eval of the ancestor located 2 plies
+    // higher up on THE current path — never that of another branch.
+    // When this ancestor was in check (sentinel), improving = false (the
+    // most cautious setting). This is the technique used by modern engines (the
+    // ss->staticEval stack in Stockfish).
     //
-    // EXCEPTION — recherche de Singular Extension : elle rappelle alpha_beta()
-    // au MÊME ply (aucun coup joué) avec excluded_move non nul. Si elle écrivait
-    // eval_history[ply], elle écraserait la valeur que le nœud ENGLOBANT y a
-    // légitimement placée, corrompant l'index pour la suite de l'exploration
-    // RÉELLE de ce nœud. On n'écrit donc QUE lorsque excluded_move est nul
-    // (visite réelle). La recherche SE porte de toute façon sur la même
-    // position : ses descendants lisant eval_history[ply] y trouvent la bonne
-    // valeur, déjà en place.
+    // EXCEPTION — Singular Extension search: it calls alpha_beta() again
+    // at the SAME ply (no move played) with excluded_move non-null. If it wrote
+    // eval_history[ply], it would overwrite the value that the ENCLOSING node
+    // legitimately placed there, corrupting the index for the rest of the
+    // ACTUAL exploration of this node. We therefore only write when excluded_move is null
+    // (actual visit). The SE search is on the same
+    // position anyway: its descendants reading eval_history[ply] find the correct
+    // value already in place.
     if excluded_move.is_null() && ply < MAX_PLY {
         info.eval_history[ply] = static_eval_opt.unwrap_or(EVAL_HISTORY_NONE);
     }
 
     let improving = if info.toggles.disable_improving {
-        // Interrupteur runtime (tests SPRT, voir bin/selfplay.rs) : `improving`
-        // forcé à false. Aucun effet en jeu normal (disable_improving = false).
+        // Runtime switch (SPRT tests, see bin/selfplay.rs): `improving`
+        // forced to false. No effect in normal play (disable_improving = false).
         false
     } else {
         match static_eval_opt {
@@ -896,25 +896,25 @@ pub fn alpha_beta(
     };
 
     // --- Reverse Futility Pruning (Static Null Move) ---
-    // Si l'évaluation statique dépasse déjà largement bêta, l'adversaire ne
-    // laisserait jamais la partie atteindre cette position : on coupe sans
-    // même tenter le coup nul. C'est le symétrique du Razoring ci-dessous —
-    // celui-ci coupe côté bêta (position trop bonne), Razoring coupe côté
-    // alpha (position trop mauvaise).
+    // If the static evaluation already exceeds beta by a wide margin, the opponent would
+    // never let the game reach this position: we cut without
+    // even trying the null move. This is the mirror of Razoring below —
+    // this one cuts on the beta side (position too good), Razoring cuts on the
+    // alpha side (position too bad).
     //
-    // Désactivé en fenêtre nulle non pertinent ici contrairement à Razoring :
-    // RFP profite justement le plus des nœuds non-PV (fenêtre nulle), qui
-    // sont les plus nombreux dans l'arbre PVS.
+    // Not disabled in a null window here, unlike Razoring:
+    // RFP actually benefits the most from non-PV nodes (null window), which
+    // are the most numerous in the PVS tree.
     //
-    // Marge : 120 centipawns par ply de profondeur restante — une position
-    // jugée à +120*depth au-dessus de bêta a très peu de chances d'être
-    // retournée par une recherche plus profonde à cette profondeur.
+    // Margin: 120 centipawns per ply of remaining depth — a position
+    // evaluated at +120*depth above beta has very little chance of being
+    // returned by a deeper search at this depth.
     //
-    // Ajustement "improving" : si la position s'améliore (voir plus haut),
-    // la marge est réduite de 120 cp (depth - 1 au lieu de depth) — on fait
-    // davantage confiance à un score déjà bon quand la tendance le confirme,
-    // donc on coupe plus facilement. Si la position NE s'améliore PAS,
-    // la marge complète reste en vigueur (plus prudent, coupe moins souvent).
+    // "improving" adjustment: if the position is improving (see above),
+    // the margin is reduced by 120 cp (depth - 1 instead of depth) — we
+    // trust an already good score more when the trend confirms it,
+    // so we cut more easily. If the position is NOT improving,
+    // the full margin remains in effect (more cautious, cuts less often).
     const RFP_MAX_DEPTH:        i32 = 6;
     const RFP_MARGIN_PER_DEPTH: i32 = 120;
 
@@ -924,29 +924,29 @@ pub fn alpha_beta(
             && static_eval - rfp_margin >= beta
             && static_eval.abs() < SCORE_MATE - 200
         {
-            // Fail-hard : on retourne `beta`, pas le score brut, par cohérence
-            // avec toutes les autres coupures de ce fichier (Null Move Pruning,
-            // stand-pat en quiescence, etc.).
+            // Fail-hard: we return `beta`, not the raw score, for consistency
+            // with all other cutoffs in this file (Null Move Pruning,
+            // stand-pat in quiescence, etc.).
             return beta;
         }
     }
 
     // --- Razoring ---
-    // (anciennement nommé "Futility Pruning" dans ce fichier — corrigé :
-    // la terminologie standard appelle "Razoring" la coupe au NIVEAU DU
-    // NŒUD basée sur alpha, et réserve "Futility Pruning" à une coupe PAR
-    // COUP à l'intérieur de la boucle des coups silencieux. Ce fichier
-    // n'implémente que la version "nœud" — Razoring est donc le nom exact.)
+    // (previously named "Futility Pruning" in this file — fixed:
+    // standard terminology calls "Razoring" the cut at the NODE
+    // LEVEL based on alpha, and reserves "Futility Pruning" for a PER-MOVE
+    // cut inside the quiet-move loop. This file
+    // only implements the "node" version — Razoring is therefore the correct name.)
     //
-    // Aux profondeurs 1-2, si l'évaluation statique + une marge de sécurité
-    // est encore sous alpha, les coups silencieux ne peuvent pas sauver la
-    // position : on plonge directement en quiescence.
+    // At depths 1-2, if the static evaluation + a safety margin
+    // is still below alpha, quiet moves cannot save the
+    // position: we drop directly into quiescence.
     //
-    // Désactivé si :
-    //   - En échec, racine, ou recherche SE (cf. static_eval_opt ci-dessus)
-    //   - Fenêtre nulle (alpha == beta - 1) : sécurité supplémentaire,
-    //     contrairement au RFP qui lui profite des fenêtres nulles
-    //   - Score proche d'un mat
+    // Disabled if:
+    //   - In check, at the root, or in an SE search (cf. static_eval_opt above)
+    //   - Null window (alpha == beta - 1): extra safety,
+    //     unlike RFP, which benefits from null windows
+    //   - Score close to a mate
     if let Some(static_eval) = static_eval_opt {
         if depth <= 2
             && alpha != beta - 1
@@ -962,23 +962,23 @@ pub fn alpha_beta(
     }
 
     // --- Null Move Pruning ---
-    // On passe son tour : si le score dépasse quand même bêta, la position est
-    // trop bonne pour l'adversaire → coupure sans explorer.
+    // We pass our turn: if the score still exceeds beta, the position is
+    // too good for the opponent → cutoff without exploring.
     //
-    // Ajustement "improving" : réduction R=4 si la position s'améliore (plus
-    // agressif — la dynamique récente rend un piège de zugzwang moins
-    // probable), R=3 sinon (réglage d'origine, plus prudent). `.max(0)` au
-    // cas où R=4 ramènerait la profondeur de l'enfant sous zéro (possible à
-    // depth==3 avec R=4 : 3-4=-1) — la garde existante `depth <= 0 →
-    // quiescence` au sommet de la fonction gère 0 sans problème, `.max(0)`
-    // évite simplement de transmettre une profondeur négative inutilement.
+    // "improving" adjustment: reduction R=4 if the position is improving (more
+    // aggressive — the recent dynamics make a zugzwang trap less
+    // likely), R=3 otherwise (original setting, more cautious). `.max(0)` in
+    // case R=4 would bring the child's depth below zero (possible at
+    // depth==3 with R=4: 3-4=-1) — the existing guard `depth <= 0 →
+    // quiescence` at the top of the function handles 0 without issue, `.max(0)`
+    // simply avoids needlessly passing a negative depth.
     //
-    // Désactivé si :
-    //   - En échec
-    //   - Profondeur < 3
-    //   - Racine
-    //   - Recherche SE : le coup nul interagit mal avec l'exclusion
-    //   - Roi + pions seulement (zugzwang possible)
+    // Disabled if:
+    //   - In check
+    //   - Depth < 3
+    //   - Root
+    //   - SE search: the null move interacts poorly with the exclusion
+    //   - King + pawns only (zugzwang possible)
     if !in_check
         && depth >= 3
         && ply > 0
@@ -1000,7 +1000,7 @@ pub fn alpha_beta(
                 -beta + 1,
                 ply + 1,
                 tt, killers, history, countermoves, cont_history,
-                Move::NULL, // pas de coup réel à tracer après un coup nul
+                Move::NULL, // no real move to trace after a null move
                 info,
                 Move::NULL,
                 &[],
@@ -1015,22 +1015,22 @@ pub fn alpha_beta(
 
     // --- Singular Extension ---
     //
-    // Un coup est "singulier" si c'est le seul qui maintient le score.
-    // Mécanisme :
-    //   1. On prend le coup TT (meilleur coup connu à cette position).
-    //   2. On lance une recherche à profondeur réduite en l'EXCLUANT.
-    //   3. Si tous les autres coups échouent sous (tt_score - marge) :
-    //      → Le coup TT est singulier, on l'étend de +1 dans la boucle principale.
-    //   4. Si même sans le coup TT le score dépasse bêta (multi-cut) :
-    //      → Il existe plusieurs bons coups, on peut couper directement.
+    // A move is "singular" if it is the only one that maintains the score.
+    // Mechanism:
+    //   1. We take the TT move (the best known move for this position).
+    //   2. We run a reduced-depth search EXCLUDING it.
+    //   3. If all other moves fail below (tt_score - margin):
+    //      → The TT move is singular, we extend it by +1 in the main loop.
+    //   4. If even without the TT move the score exceeds beta (multi-cut):
+    //      → There are several good moves, we can cut directly.
     //
-    // Conditions d'activation (toutes requises) :
-    //   depth >= 6   : SE est coûteux (~50% de nœuds en plus), inutile en bas
-    //   ply > 0      : jamais à la racine
-    //   excluded_move.is_null() : jamais dans une recherche SE imbriquée
-    //   !in_check    : la Check Extension gère déjà les positions d'échec
-    //   tt_move non nul + entrée TT fiable (profondeur et flag)
-    //   score TT loin d'un mat
+    // Activation conditions (all required):
+    //   depth >= 6   : SE is expensive (~50% more nodes), useless near the bottom
+    //   ply > 0      : never at the root
+    //   excluded_move.is_null() : never in a nested SE search
+    //   !in_check    : the Check Extension already handles positions in check
+    //   tt_move non-null + reliable TT entry (depth and flag)
+    //   TT score far from a mate
     let mut singular_extension = 0i32;
 
     if depth >= 6
@@ -1040,52 +1040,52 @@ pub fn alpha_beta(
         && !tt_move.is_null()
     {
         if let Some(ref entry) = tt_entry_opt {
-            // L'entrée TT doit être assez profonde pour être fiable.
-            // UpperBound → score TT peut être surestimé → non fiable pour SE.
+            // The TT entry must be deep enough to be reliable.
+            // UpperBound → TT score may be overestimated → unreliable for SE.
             if entry.depth >= depth - 3 && entry.flag != TTFlag::UpperBound {
                 let tt_score = TranspositionTable::adjust_score_from_tt(
                     entry.score, ply as i32,
                 );
 
-                // Ne pas appliquer SE près d'un score de mat
+                // Do not apply SE near a mate score
                 if tt_score.abs() < SCORE_MATE - 200 {
-                    // Marge conservatrice : 2 cp × profondeur.
-                    // Trop petite → trop d'extensions → explosion du temps.
-                    // Trop grande → trop peu d'extensions → SE inutile.
+                    // Conservative margin: 2 cp × depth.
+                    // Too small → too many extensions → time explosion.
+                    // Too large → too few extensions → SE useless.
                     let se_margin = 2 * depth;
 
-                    // se_beta : plancher que les autres coups doivent franchir
-                    // pour infirmer la singularité du coup TT.
+                    // se_beta: floor that other moves must clear
+                    // to disprove the singularity of the TT move.
                     let se_beta  = (tt_score - se_margin).max(-SCORE_MATE + 1);
 
-                    // Profondeur de vérification : environ la moitié.
-                    // Suffisante pour détecter la singularité sans coût excessif.
+                    // Verification depth: about half.
+                    // Sufficient to detect singularity without excessive cost.
                     let se_depth = (depth - 1) / 2;
 
-                    // Recherche de vérification.
-                    // La position sur le plateau N'EST PAS modifiée (aucun make_move).
-                    // Le coup TT est passé comme excluded_move → il sera sauté.
+                    // Verification search.
+                    // The position on the board is NOT modified (no make_move).
+                    // The TT move is passed as excluded_move → it will be skipped.
                     let se_score = alpha_beta(
                         board,
                         se_depth,
-                        se_beta - 1,  // Fenêtre nulle : [se_beta-1, se_beta]
+                        se_beta - 1,  // Null window: [se_beta-1, se_beta]
                         se_beta,
-                        ply,          // Même ply : aucun coup n'a été joué
+                        ply,          // Same ply: no move has been played
                         tt, killers, history, countermoves, cont_history,
-                        prev_move,    // Aucun coup joué ici : même contexte que le nœud courant
+                        prev_move,    // No move played here: same context as the current node
                         info,
-                        tt_move,      // ← Exclusion du coup TT
+                        tt_move,      // ← Exclusion of the TT move
                         &[],
                     );
 
                     if !info.should_stop() {
                         if se_score < se_beta {
-                            // Singulier confirmé : le coup TT est le seul bon coup
-                            // dans cette position → on l'étendra de +1 dans la boucle.
+                            // Singular confirmed: the TT move is the only good move
+                            // in this position → it will be extended by +1 in the loop.
                             singular_extension = 1;
                         } else if se_score >= beta {
-                            // Multi-cut : même sans le coup TT, le score dépasse bêta.
-                            // Il y a donc plusieurs bons coups → on peut couper.
+                            // Multi-cut: even without the TT move, the score exceeds beta.
+                            // There are therefore several good moves → we can cut.
                             return beta;
                         }
                     }
@@ -1096,52 +1096,52 @@ pub fn alpha_beta(
 
     // --- Internal Iterative Reduction (IIR) ---
     //
-    // Si la TT n'a AUCUN coup pour ce nœud (jamais visité, ou visité à une
-    // profondeur insuffisante pour avoir stocké un coup utile), c'est le
-    // signe que cette branche est peu explorée — on réduit la profondeur
-    // d'1 avant de continuer, plutôt que de la traiter avec la même
-    // confiance qu'un nœud déjà bien documenté par la TT.
+    // If the TT has NO move for this node (never visited, or visited at a
+    // depth insufficient to have stored a useful move), it is the
+    // sign that this branch is little explored — we reduce the depth
+    // by 1 before continuing, rather than treating it with the same
+    // confidence as a node already well documented by the TT.
     //
-    // Remplace l'ancienne Internal Iterative Deepening (IID) — qui lançait
-    // une recherche à profondeur réduite UNIQUEMENT pour deviner un bon coup
-    // avant de continuer (coût : un appel récursif supplémentaire). L'IIR
-    // n'effectue AUCUN appel récursif : une simple soustraction conditionnelle
-    // sur `depth`, qui se propage ensuite naturellement à tout le reste du
-    // traitement de ce nœud (boucle de coups, profondeurs des enfants,
-    // stockage TT en fin de fonction). C'est la version utilisée par les
-    // moteurs modernes (dont Stockfish), bien moins coûteuse que l'IID
-    // classique pour un effet comparable.
+    // Replaces the old Internal Iterative Deepening (IID) — which launched
+    // a reduced-depth search ONLY to guess a good move
+    // before continuing (cost: an additional recursive call). IIR
+    // performs NO recursive call: a simple conditional subtraction
+    // on `depth`, which then propagates naturally to the rest of the
+    // processing of this node (move loop, child depths,
+    // TT storage at the end of the function). This is the version used by
+    // modern engines (including Stockfish), much less costly than the classic
+    // IID for a comparable effect.
     //
-    // Désactivé si :
-    //   - Coup TT présent (tt_move non nul) : rien à corriger, le nœud est
-    //     déjà bien renseigné
-    //   - depth < IIR_MIN_DEPTH : la réduction n'a plus d'intérêt à très
-    //     faible profondeur (la quiescence ou les autres pruning gèrent déjà ça)
-    //   - Recherche SE (excluded_move non nul) : ne pas perturber la
-    //     vérification de singularité avec une profondeur déjà réduite par
-    //     autre chose qu'elle-même
+    // Disabled if:
+    //   - TT move present (tt_move non-null): nothing to correct, the node is
+    //     already well documented
+    //   - depth < IIR_MIN_DEPTH: the reduction is no longer useful at very
+    //     low depth (quiescence or other pruning already handle that)
+    //   - SE search (excluded_move non-null): do not disturb the
+    //     singularity verification with a depth already reduced by
+    //     something other than itself
     const IIR_MIN_DEPTH: i32 = 4;
     if tt_move.is_null() && depth >= IIR_MIN_DEPTH && excluded_move.is_null() {
         depth -= 1;
     }
 
-    // --- Génération des coups légaux ---
+    // --- Legal move generation ---
     //
-    // Racine avec searchmoves pré-filtrés (root_moves non-vide) :
-    //   On utilise directement la liste préparée par search().
-    //   Avantages vs l'ancien filtre interne :
-    //     - Zéro appel generate_legal_moves() à la racine.
-    //     - Zéro allocation de String (to_uci() fait partie du passé).
-    //     - Le filtre est appliqué UNE SEULE FOIS avant l'itération en profondeur.
-    //     - SearchInfo n'a plus de Vec<String> heap-alloué propagé à chaque nœud.
+    // Root with pre-filtered searchmoves (root_moves non-empty):
+    //   We use directly the list prepared by search().
+    //   Advantages vs the old internal filter:
+    //     - Zero generate_legal_moves() call at the root.
+    //     - Zero String allocation (to_uci() is a thing of the past).
+    //     - The filter is applied ONLY ONCE before the depth iteration.
+    //     - SearchInfo no longer has a heap-allocated Vec<String> propagated to each node.
     //
-    //   excluded_move est toujours NULL à ply==0 (SE n'est actif qu'à ply>0)
-    //   → pas de retain() nécessaire dans ce cas.
+    //   excluded_move is always NULL at ply==0 (SE is only active at ply>0)
+    //   → no retain() needed in this case.
     //
-    // Appels récursifs (root_moves vide) : génération normale + exclusion SE.
-    // Liste de coups allouée sur la PILE (MoveList) — aucune allocation tas par
-    // nœud, contrairement à l'ancien Vec<Move>. Indexation, len(), iter(),
-    // swap() et slicing fonctionnent via Deref vers [Move].
+    // Recursive calls (root_moves empty): normal generation + SE exclusion.
+    // Move list allocated on the STACK (MoveList) — no heap allocation per
+    // node, unlike the old Vec<Move>. Indexing, len(), iter(),
+    // swap() and slicing work via Deref to [Move].
     let mut moves = MoveList::new();
     if ply == 0 && !root_moves.is_empty() {
         for &mv in root_moves {
@@ -1154,33 +1154,33 @@ pub fn alpha_beta(
         }
     }
 
-    // --- Fin de partie ---
+    // --- End of game ---
     if moves.is_empty() {
         if in_check {
-            // Échec et mat : préférer les mats rapides (ply petit)
+            // Checkmate: prefer fast mates (small ply)
             return -(SCORE_MATE - ply as i32);
         } else {
-            // Pat
+            // Stalemate
             return draw_score(info.contempt, ply);
         }
     }
 
-    // --- Tri paresseux par sélection (lazy selection sort) ---
+    // --- Lazy selection sort ---
     //
-    // Principe : au lieu de trier intégralement N coups en O(N log N),
-    //   on calcule tous les scores en une passe O(N) puis on sélectionne
-    //   le meilleur coup restant à chaque itération par un balayage linéaire.
+    // Principle: instead of fully sorting N moves in O(N log N),
+    //   we compute all scores in one O(N) pass and then select
+    //   the best remaining move at each iteration via a linear scan.
     //
-    //   Coût total : O(N) scores + O(k × N) sélections pour k coups examinés.
+    //   Total cost: O(N) scores + O(k × N) selections for k moves examined.
     //
-    //   Gain vs tri complet O(N log N + N × traitement) :
-    //     Si la coupure bêta arrive au k-ième coup (k ≪ N), on économise
-    //     O(N log N − k × N) opérations. Avec un taux de coupure élevé
-    //     (coup TT / killer en tête), k vaut typiquement 1–3 sur la plupart
-    //     des nœuds internes → économie substantielle sur l'arbre entier.
+    //   Gain vs full sort O(N log N + N × processing):
+    //     If the beta cutoff occurs at the k-th move (k ≪ N), we save
+    //     O(N log N − k × N) operations. With a high cutoff rate
+    //     (TT move / killer at the top), k is typically 1–3 for most
+    //     internal nodes → substantial savings across the whole tree.
     //
-    //   Cas défavorable : k = N (aucune coupure) → O(N²) au lieu de O(N log N).
-    //   En pratique rarissime aux profondeurs élevées grâce au mouvement TT.
+    //   Unfavorable case: k = N (no cutoff) → O(N²) instead of O(N log N).
+    //   In practice extremely rare at high depths thanks to the TT move.
     debug_assert!(moves.len() <= MAX_MOVES,
         "alpha_beta: {} coups dépasse MAX_MOVES={}", moves.len(), MAX_MOVES);
     let move_count = moves.len();
@@ -1189,26 +1189,26 @@ pub fn alpha_beta(
         scores[i] = move_score(board, mv, tt_move, killers, history, countermoves, cont_history, prev_key, ply);
     }
 
-    // BUG ÉVITÉ (audit robustesse post-LMP) : un coup élagué par Late Move
-    // Pruning n'est JAMAIS réellement recherché — il ne "perd" pas, il n'est
-    // simplement pas examiné. Sans ce suivi, history.update_bad() ci-dessous
-    // (déclenché par une coupure bêta sur un coup ultérieur) pénaliserait
-    // aussi les coups élagués comme s'ils avaient été essayés et avaient
-    // échoué, alors qu'ils n'ont jamais été soumis à une recherche. Dégrade
-    // silencieusement la qualité de l'history heuristic sans jamais planter
-    // — donc jamais détecté par les tests perft/benchmark existants.
+    // BUG AVOIDED (post-LMP robustness audit): a move pruned by Late Move
+    // Pruning is NEVER actually searched — it does not "lose", it is
+    // simply not examined. Without this tracking, history.update_bad() below
+    // (triggered by a beta cutoff on a later move) would also penalize
+    // the pruned moves as if they had been tried and had
+    // failed, even though they were never submitted to a search. Silently
+    // degrades the quality of the history heuristic without ever crashing
+    // — so never detected by the existing perft/benchmark tests.
     let mut lmp_pruned = [false; MAX_MOVES];
 
-    // --- Exploration des coups ---
+    // --- Move exploration ---
     let mut best_score = -SCORE_INF;
-    let mut best_move  = Move::NULL; // mis à jour dès le premier coup examiné
+    let mut best_move  = Move::NULL; // updated as soon as the first move is examined
     let mut tt_flag    = TTFlag::UpperBound;
 
     for move_index in 0..move_count {
-        // Sélection du meilleur coup restant : balayage O(N − move_index).
-        // On amène le coup au score maximum en position `move_index` par échange,
-        // de sorte que moves[0..=move_index] contienne toujours les coups examinés
-        // par ordre de score décroissant (utile pour history.update_bad ci-dessous).
+        // Selection of the best remaining move: O(N − move_index) scan.
+        // We bring the move with the maximum score to position `move_index` by swapping,
+        // so that moves[0..=move_index] always contains the moves examined
+        // in decreasing score order (useful for history.update_bad below).
         let best_idx = {
             let mut b = move_index;
             for j in (move_index + 1)..move_count {
@@ -1219,67 +1219,67 @@ pub fn alpha_beta(
         moves.swap(move_index, best_idx);
         scores.swap(move_index, best_idx);
 
-        // mv est une copie (Move implémente Copy) — pas de déréférencement requis.
+        // mv is a copy (Move implements Copy) — no dereferencing required.
         let mv = moves[move_index];
 
-        // --- info currmove / currmovenumber (UCI, racine uniquement) ---
-        // Retour visuel pur pour la GUI ("en cours d'analyse : tel coup, n-ième
-        // sur N") — aucun effet sur la recherche elle-même. Émis uniquement à
-        // ply == 0 (jamais dans la boucle chaude des nœuds internes) ET
-        // uniquement si info.show_currmove est actif.
+        // --- info currmove / currmovenumber (UCI, root only) ---
+        // Pure visual feedback for the GUI ("currently analyzing: such move, nth
+        // of N") — no effect on the search itself. Emitted only at
+        // ply == 0 (never in the hot loop of internal nodes) AND
+        // only if info.show_currmove is active.
         //
-        // BUG CORRIGÉ : la première version imprimait sans condition dès que
-        // ply == 0, ce qui polluait la sortie de TOUT appelant de alpha_beta()
-        // — y compris src/bin/benchmark.rs, qui appelle alpha_beta() directement
-        // (hors couche UCI) pour mesurer le NPS brut. Le garde-fou
-        // show_currmove (false par défaut, activé uniquement par
-        // SearchEngine::search(), la vraie recherche pilotée par l'UCI) isole
-        // proprement ce comportement spécifique à l'UCI du reste des usages
-        // de alpha_beta() dans le projet.
+        // BUG FIXED: the first version printed unconditionally as soon as
+        // ply == 0, which polluted the output of ANY caller of alpha_beta()
+        // — including src/bin/benchmark.rs, which calls alpha_beta() directly
+        // (outside the UCI layer) to measure raw NPS. The safeguard
+        // show_currmove (false by default, enabled only by
+        // SearchEngine::search(), the real search driven by the UCI) cleanly
+        // isolates this UCI-specific behavior from the rest of the uses
+        // of alpha_beta() in the project.
         if ply == 0 && info.show_currmove {
             println!("info currmove {} currmovenumber {}", mv.to_uci(), move_index + 1);
         }
 
         board.make_move(mv);
 
-        // Préchargement TT : board.hash est désormais le hash de la position
-        // ENFANT, que la descente récursive va sonder en tout premier. On lance
-        // le chargement de la ligne de cache MAINTENANT pour qu'elle soit chaude
-        // au moment du probe() de l'enfant — la latence mémoire est masquée par
-        // le calcul d'extension / LMP qui suit. Pure vitesse, zéro effet de bord.
+        // TT prefetch: board.hash is now the hash of the
+        // CHILD position, which the recursive descent will probe first. We
+        // launch the loading of the cache line NOW so that it is hot
+        // by the time of the child's probe() — the memory latency is masked by
+        // the extension / LMP calculation that follows. Pure speed, zero side effect.
         tt.prefetch(board.hash);
 
-        // --- Calcul de l'extension pour ce coup ---
+        // --- Extension calculation for this move ---
         //
-        // Check Extension : le coup met l'adversaire en échec → position critique.
-        //   Conditions cumulées :
-        //     1. gives_check      : le coup met effectivement en échec
-        //     2. depth <= 4       : utile uniquement en faible profondeur restante
-        //     3. ply + 1 < MAX_PLY : borne de sécurité CRITIQUE contre la récursion infinie.
+        // Check Extension: the move puts the opponent in check → critical position.
+        //   Cumulative conditions:
+        //     1. gives_check      : the move actually gives check
+        //     2. depth <= 4       : useful only at low remaining depth
+        //     3. ply + 1 < MAX_PLY : CRITICAL safety bound against infinite recursion.
         //
-        //   Sans la condition (3), si depth == 4 et extension == 1 :
-        //     depth_enfant = 4 - 1 + 1 = 4  → la profondeur NE DÉCROÎT PAS.
-        //   Toute séquence de coups donnant chacun échec crée une récursion sans fin.
-        //   Au-delà de MAX_PLY plies, l'extension est désactivée ; depth passe à 3,
-        //   puis 2, puis 1, puis 0 → quiescence → terminaison garantie.
+        //   Without condition (3), if depth == 4 and extension == 1:
+        //     depth_child = 4 - 1 + 1 = 4  → the depth DOES NOT DECREASE.
+        //   Any sequence of moves each giving check creates infinite recursion.
+        //   Beyond MAX_PLY plies, the extension is disabled; depth goes to 3,
+        //   then 2, then 1, then 0 → quiescence → guaranteed termination.
         //
-        // Singular Extension : ce coup est le seul bon dans la position.
-        //   Ne s'applique QU'AU coup TT (celui dont la singularité a été vérifiée).
-        //   Les deux extensions sont mutuellement exclusives par construction
-        //   (Check Extension prend la priorité si le coup donne aussi échec).
+        // Singular Extension: this move is the only good one in the position.
+        //   Applies ONLY to the TT move (the one whose singularity was verified).
+        //   The two extensions are mutually exclusive by construction
+        //   (Check Extension takes priority if the move also gives check).
         //
-        //   BUG CORRIGÉ (audit post-session) : cette extension souffrait du même
-        //   défaut que la Check Extension avant sa correction — elle ajoutait +1
-        //   à la profondeur de l'enfant (depth_enfant = depth-1+1 = depth) SANS
-        //   la borne `ply + 1 < MAX_PLY`. Comme la Singular Extension se déclenche
-        //   à depth >= 6, l'enfant restait à depth >= 6 et pouvait, en théorie,
-        //   être à son tour jugé singulier au nœud suivant — répétant le phénomène
-        //   sans que la profondeur ne décroisse jamais. Contrairement aux échecs
-        //   perpétuels (qui finissent par répéter une position, détectée par la
-        //   règle de nulle), une chaîne de positions "singulières" n'a aucune
-        //   raison de répéter le plateau : rien d'autre n'aurait arrêté la
-        //   récursion, avec un risque de dépassement de pile. Même garde que la
-        //   Check Extension, appliquée ici par cohérence et par sécurité.
+        //   BUG FIXED (post-session audit): this extension suffered from the same
+        //   flaw as the Check Extension before its fix — it added +1
+        //   to the child's depth (depth_child = depth-1+1 = depth) WITHOUT
+        //   the `ply + 1 < MAX_PLY` bound. Since the Singular Extension triggers
+        //   at depth >= 6, the child remained at depth >= 6 and could, in theory,
+        //   in turn be judged singular at the next node — repeating the phenomenon
+        //   without the depth ever decreasing. Unlike perpetual checks
+        //   (which eventually repeat a position, detected by the
+        //   draw rule), a chain of "singular" positions has no
+        //   reason to repeat the board: nothing else would have stopped the
+        //   recursion, with a risk of stack overflow. Same guard as the
+        //   Check Extension, applied here for consistency and safety.
         let gives_check = is_in_check(board, board.side_to_move);
         let extension   = if gives_check && depth <= 4 && ply + 1 < MAX_PLY {
             1  // Check Extension
@@ -1291,38 +1291,38 @@ pub fn alpha_beta(
 
         // --- Late Move Pruning (LMP) ---
         //
-        // Aux profondeurs faibles, un coup silencieux qui arrive très tard
-        // dans l'ordre (beaucoup de coups mieux classés l'ont déjà précédé)
-        // a une probabilité si faible d'améliorer alpha que rechercher tout
-        // son sous-arbre n'est presque jamais rentable. Contrairement au LMR
-        // qui réduit seulement la profondeur de la sonde, ici on ne recherche
-        // PAS DU TOUT ce coup à cette profondeur — gain maximal, mais aussi
-        // le pruning le plus agressif de ce fichier.
+        // At shallow depths, a quiet move that arrives very late
+        // in the ordering (many better-ranked moves have already preceded it)
+        // has such a low probability of improving alpha that searching its
+        // entire subtree is almost never worthwhile. Unlike LMR,
+        // which only reduces the depth of the probe, here we do NOT
+        // search this move AT ALL at this depth — maximum gain, but also
+        // the most aggressive pruning in this file.
         //
-        // Sûr UNIQUEMENT parce que le Countermove Heuristic est désormais en
-        // place : l'ordre des coups doit être fiable pour qu'un coup "tardif"
-        // soit vraiment un mauvais candidat plutôt qu'un bon coup mal classé.
-        // Implémenté APRÈS le Countermove Heuristic dans ce projet, pas avant,
-        // précisément pour cette raison.
+        // Safe ONLY because the Countermove Heuristic is now in
+        // place: move ordering must be reliable for a "late" move
+        // to truly be a bad candidate rather than a good move that was poorly ranked.
+        // Implemented AFTER the Countermove Heuristic in this project, not before,
+        // precisely for this reason.
         //
-        // Désactivé si :
-        //   - Nœud courant en échec (in_check) : peu de coups légaux, souvent
-        //     tous tactiques — jamais de LMP dans ces positions
-        //   - Le coup donne échec (gives_check) : position critique
-        //   - Le coup a reçu une extension (Check ou Singular) : on vient
-        //     juste de décider qu'il méritait UNE PROFONDEUR DE PLUS, le
-        //     pruner ici serait contradictoire
-        //   - Capture ou promotion : déjà bien ordonnées par SEE, jamais prunées
-        //   - Killer move ou countermove (CORRIGÉ — audit robustesse) : ce
-        //     sont précisément les coups dont on a la PREUVE qu'ils ont été
-        //     efficaces ailleurs dans l'arbre (killer) ou contre ce type de
-        //     coup adverse (countermove). Sans cette exemption, un coup avec
-        //     un historique de réussite pouvait être sauté simplement parce
-        //     que plusieurs captures gagnantes le précédaient dans le tri —
-        //     contraire à la pratique standard, qui protège toujours ces
-        //     deux catégories du Late Move Pruning.
-        //   - Profondeur > LMP_MAX_DEPTH : marge de sécurité, devient un no-op
-        //     naturel au-delà (voir commentaire de lmp_threshold)
+        // Disabled if:
+        //   - Current node in check (in_check): few legal moves, often
+        //     all tactical — never LMP in these positions
+        //   - The move gives check (gives_check): critical position
+        //   - The move received an extension (Check or Singular): we just
+        //     decided it deserved ONE MORE PLY, pruning
+        //     here would be contradictory
+        //   - Capture or promotion: already well ordered by SEE, never pruned
+        //   - Killer move or countermove (FIXED — robustness audit): these
+        //     are precisely the moves for which we have PROOF that they were
+        //     effective elsewhere in the tree (killer) or against this type of
+        //     opponent move (countermove). Without this exemption, a move with
+        //     a track record of success could be skipped simply because
+        //     several winning captures preceded it in the ordering —
+        //     contrary to standard practice, which always protects these
+        //     two categories from Late Move Pruning.
+        //   - Depth > LMP_MAX_DEPTH: safety margin, naturally becomes a
+        //     no-op beyond that (see the lmp_threshold comment)
         let is_killer_move = killers.is_killer(mv, ply);
         let is_countermove = prev_key.is_some_and(|(p, t)| countermoves.get(p, t) == mv);
 
@@ -1341,31 +1341,31 @@ pub fn alpha_beta(
             continue;
         }
 
-        // --- Futility Pruning (par coup) ---
+        // --- Futility Pruning (per move) ---
         //
-        // ⚠️ HEURISTIQUE À VALIDER PAR MATCH SPRT avant d'être considérée comme
-        // acquise (les marges ci-dessous sont un point de départ CONSERVATEUR, à
-        // régler par test A/B — voir la méthode des tests d'Elo). Désactivable
-        // à l'exécution via `info.toggles.disable_futility` (utilisé par le binaire
-        // selfplay pour les matchs SPRT, clés futility_a / futility_b).
+        // ⚠️ HEURISTIC TO BE VALIDATED BY SPRT MATCH before being considered
+        // settled (the margins below are a CONSERVATIVE starting point, to
+        // be tuned by A/B testing — see the Elo testing method). Can be disabled
+        // at runtime via `info.toggles.disable_futility` (used by the
+        // selfplay binary for SPRT matches, keys futility_a / futility_b).
         //
-        // Idée : près des feuilles, un coup SILENCIEUX qui ne donne pas échec ne
-        // peut quasiment pas remonter alpha si l'évaluation statique du nœud,
-        // augmentée d'une marge, reste déjà sous alpha. On le saute sans le
-        // rechercher. Complémentaire des deux autres élagages déjà présents :
-        //   - Razoring  : coupe au NIVEAU DU NŒUD (avant la boucle de coups) ;
-        //   - LMP       : coupe sur le NOMBRE de coups déjà examinés ;
-        //   - Futility  : coupe COUP PAR COUP, sur le SCORE statique vs alpha.
+        // Idea: near the leaves, a QUIET move that does not give check can
+        // barely raise alpha if the node's static evaluation,
+        // increased by a margin, is already below alpha. We skip it without
+        // searching it. Complementary to the two other prunings already present:
+        //   - Razoring : cuts at the NODE LEVEL (before the move loop);
+        //   - LMP      : cuts on the NUMBER of moves already examined;
+        //   - Futility : cuts MOVE BY MOVE, on the static SCORE vs alpha.
         //
-        // Conditions (toutes requises, calquées sur la LMP pour la sûreté) :
-        //   - static_eval disponible (donc hors échec, hors racine, hors SE) ;
-        //   - move_index > 0 : on garde TOUJOURS le coup principal ;
-        //   - extension == 0 : ne jamais pruner un coup qu'on vient d'étendre ;
-        //   - depth faible : la marge ne couvre le risque qu'à faible profondeur ;
-        //   - coup silencieux ne donnant pas échec ;
-        //   - ni killer ni countermove (efficacité déjà prouvée ailleurs) ;
-        //   - alpha hors zone de mat (par sécurité) ;
-        //   - static_eval + marge <= alpha.
+        // Conditions (all required, modeled on LMP for safety):
+        //   - static_eval available (so outside check, outside root, outside SE);
+        //   - move_index > 0: we ALWAYS keep the main move;
+        //   - extension == 0: never prune a move we just extended;
+        //   - low depth: the margin only covers the risk at low depth;
+        //   - quiet move not giving check;
+        //   - neither killer nor countermove (effectiveness already proven elsewhere);
+        //   - alpha outside the mate zone (for safety);
+        //   - static_eval + margin <= alpha.
         const FUTILITY_MAX_DEPTH:        i32 = 6;
         const FUTILITY_MARGIN_PER_DEPTH: i32 = 100;
 
@@ -1382,8 +1382,8 @@ pub fn alpha_beta(
                 && alpha < SCORE_MATE - 200
                 && static_eval + FUTILITY_MARGIN_PER_DEPTH * depth <= alpha
             {
-                // Non recherché → exclu de history.update_bad (comme la LMP),
-                // via le même marquage lmp_pruned[].
+                // Not searched → excluded from history.update_bad (like LMP),
+                // via the same lmp_pruned[] marking.
                 lmp_pruned[move_index] = true;
                 board.unmake_move(mv);
                 continue;
@@ -1392,33 +1392,33 @@ pub fn alpha_beta(
 
         // --- Principal Variation Search (PVS) + Late Move Reduction (LMR) ---
         //
-        // Coup n°1 (move_index == 0) : c'est le coup le mieux classé par
-        // l'ordonnancement (TT move, ou meilleure capture/killer/history à
-        // défaut). On le recherche directement à PLEINE FENÊTRE [alpha, beta]
-        // pour obtenir un score exact qui servira de référence aux coups
-        // suivants.
+        // Move #1 (move_index == 0): this is the move ranked best by
+        // the ordering (TT move, or best capture/killer/history
+        // otherwise). We search it directly with the FULL WINDOW [alpha, beta]
+        // to obtain an exact score that will serve as a reference for the
+        // following moves.
         //
-        // Coups suivants (move_index > 0) : recherche PVS en 3 étapes.
-        //   1. Sonde à FENÊTRE NULLE [-alpha-1, -alpha] — éventuellement à
-        //      profondeur réduite si les critères LMR sont remplis (coup
-        //      tardif, silencieux, profondeur suffisante). Cette sonde ne
-        //      répond qu'à la question "ce coup dépasse-t-il alpha ?" — elle
-        //      coupe beaucoup plus tôt qu'une fenêtre complète et c'est ce
-        //      qui fait tout le gain du PVS (10-20 % de nœuds en moins).
-        //   2. Si une réduction LMR a été appliquée ET que la sonde dépasse
-        //      alpha : on ne sait pas encore si c'est un vrai bon coup ou un
-        //      faux positif dû à la réduction. On reconfirme à PLEINE
-        //      PROFONDEUR mais toujours à fenêtre nulle, avant d'envisager
-        //      la recherche la plus coûteuse (étape 3).
-        //   3. Si le coup dépasse réellement alpha (et reste sous beta) :
-        //      il appartient potentiellement à la variante principale. Seule
-        //      cette situation justifie une re-recherche à PLEINE FENÊTRE et
-        //      pleine profondeur, pour obtenir son score exact.
+        // Following moves (move_index > 0): 3-step PVS search.
+        //   1. Probe with a NULL WINDOW [-alpha-1, -alpha] — possibly at
+        //      reduced depth if the LMR criteria are met (move
+        //      late, quiet, sufficient depth). This probe only
+        //      answers the question "does this move exceed alpha?" — it
+        //      cuts off much earlier than a full window and this is what
+        //      makes the whole gain of PVS (10-20% fewer nodes).
+        //   2. If an LMR reduction was applied AND the probe exceeds
+        //      alpha: we do not yet know if this is a genuinely good move or a
+        //      false positive caused by the reduction. We reconfirm at FULL
+        //      DEPTH but still with a null window, before considering
+        //      the most costly search (step 3).
+        //   3. If the move actually exceeds alpha (and stays below beta):
+        //      it potentially belongs to the principal variation. Only
+        //      this situation justifies a re-search with FULL WINDOW and
+        //      full depth, to obtain its exact score.
         //
-        // Dans l'immense majorité des nœuds, l'étape 1 suffit (le coup ne
-        // dépasse pas alpha) : c'est précisément là que réside le gain PVS.
+        // In the vast majority of nodes, step 1 is sufficient (the move does
+        // not exceed alpha): this is precisely where the PVS gain lies.
         let score = if move_index == 0 {
-            // Coup principal : toujours pleine fenêtre, jamais de réduction.
+            // Main move: always full window, never reduced.
             -alpha_beta(
                 board,
                 depth - 1 + extension,
@@ -1426,15 +1426,15 @@ pub fn alpha_beta(
                 -alpha,
                 ply + 1,
                 tt, killers, history, countermoves, cont_history,
-                mv, // mv vient d'être joué : c'est le prev_move de l'enfant
+                mv, // mv has just been played: it is the child's prev_move
                 info,
                 Move::NULL,
                 &[],
             )
         } else {
-            // Critères LMR : coup tardif, silencieux, profondeur suffisante,
-            // ni en échec ni donnant échec (ces positions sont trop critiques
-            // pour être réduites).
+            // LMR criteria: late move, quiet, sufficient depth,
+            // neither in check nor giving check (these positions are too critical
+            // to be reduced).
             let do_lmr = depth >= 3
                 && move_index >= 3
                 && !in_check
@@ -1442,65 +1442,65 @@ pub fn alpha_beta(
                 && !mv.flags.is_capture()
                 && !mv.flags.is_promotion();
 
-            // Profondeur "normale" pour ce coup — STRICTEMENT identique à celle
-            // utilisée par le coup n°1 (move_index == 0). C'est la référence de
-            // comparaison : tous les coups d'un même nœud doivent être mesurés
-            // à la même profondeur pour que leurs scores soient comparables.
+            // "Normal" depth for this move — STRICTLY identical to the one
+            // used by move #1 (move_index == 0). This is the reference for
+            // comparison: all moves of the same node must be measured
+            // at the same depth for their scores to be comparable.
             let full_depth = depth - 1 + extension;
 
-            // BUG CORRIGÉ : la version précédente appliquait `.max(1)` à TOUS
-            // les coups non-PV, même quand do_lmr == false (reduction == 0).
-            // Or quand full_depth == 0 (très fréquent : cela se produit à
-            // CHAQUE nœud de l'arbre entier où il reste exactement 1 ply à
-            // explorer, à chaque itération d'iterative deepening), le `.max(1)`
-            // forçait ces coups à être recherchés à profondeur 1 — c'est-à-dire
-            // UN PLY DE PLUS que le coup n°1, qui lui plongeait directement en
-            // quiescence à profondeur 0. Cette incohérence systématique rendait
-            // les comparaisons de scores invalides à travers tout l'arbre :
-            // le coup n°1 (souvent un coup générique en début de liste, par
-            // exemple une poussée de pion de bord) semblait artificiellement
-            // sûr car évalué moins profondément, tandis que les coups réellement
-            // pertinents étaient pénalisés par une analyse plus poussée révélant
-            // leurs inconvénients réels. Résultat observé : le moteur jouait
-            // systématiquement des coups sans intérêt (pions de bord) en début
-            // de partie, signe que la recherche ne comparait plus correctement
-            // les coups entre eux.
+            // BUG FIXED: the previous version applied `.max(1)` to ALL
+            // non-PV moves, even when do_lmr == false (reduction == 0).
+            // However when full_depth == 0 (very frequent: this occurs at
+            // EVERY node of the entire tree where exactly 1 ply remains to
+            // be explored, at every iteration of iterative deepening), the `.max(1)`
+            // forced these moves to be searched at depth 1 — that is,
+            // ONE PLY MORE than move #1, which itself dove directly into
+            // quiescence at depth 0. This systematic inconsistency made
+            // score comparisons invalid throughout the whole tree:
+            // move #1 (often a generic move at the start of the list, for
+            // example an edge pawn push) appeared artificially
+            // safe because it was evaluated less deeply, while genuinely
+            // relevant moves were penalized by a deeper analysis revealing
+            // their real drawbacks. Observed result: the engine systematically
+            // played uninteresting moves (edge pawns) at the start
+            // of the game, a sign that the search was no longer correctly comparing
+            // moves against each other.
             //
-            // Correction : le `.max(1)` (et la réduction elle-même) ne
-            // s'appliquent désormais QUE si do_lmr est vrai. Si do_lmr est
-            // faux, probe_depth == full_depth, EXACTEMENT comme le coup n°1.
+            // Fix: the `.max(1)` (and the reduction itself) now
+            // applies ONLY if do_lmr is true. If do_lmr is
+            // false, probe_depth == full_depth, EXACTLY like move #1.
             let (probe_depth, reduced) = if do_lmr {
-                // Réduction de base : table logarithmique (depth × move_index).
+                // Base reduction: logarithmic table (depth × move_index).
                 let mut r = lmr_reduction(depth, move_index);
 
-                // --- LMR enrichi (ajustements ⚠️ À VALIDER PAR SPRT) ---
-                // Signaux qui ne sont PAS déjà captés par le rang du coup
-                // (move_index reflète déjà l'ordonnancement par history) :
-                //   - position qui NE s'améliore PAS → réduire un peu PLUS
-                //     (un coup tardif a encore moins de chances d'aider) ;
-                //   - nœud PV (fenêtre [alpha,beta] large, non nulle) → réduire
-                //     un peu MOINS (plus de précision sur la variante principale) ;
-                //   - killer ou countermove → réduire un peu MOINS (coup
-                //     silencieux dont l'efficacité est déjà prouvée ailleurs).
-                // Ajustements volontairement petits (±1) et bornés (r ≥ 1).
-                // Désactivables à l'exécution via `info.toggles.disable_lmr_tweaks`
-                // (binaire selfplay, clés lmr_a / lmr_b pour les matchs SPRT) :
-                // quand actif, on garde la réduction de BASE seule, sans les
-                // ajustements d'enrichissement — c'est exactement ce qu'on teste.
+                // --- Enriched LMR (adjustments ⚠️ TO BE VALIDATED BY SPRT) ---
+                // Signals not already captured by the move's rank
+                // (move_index already reflects the ordering by history):
+                //   - position that is NOT improving → reduce a bit MORE
+                //     (a late move has even less chance of helping);
+                //   - PV node (large, non-null window [alpha,beta]) → reduce
+                //     a bit LESS (more precision on the principal variation);
+                //   - killer or countermove → reduce a bit LESS (quiet move
+                //     whose effectiveness has already been proven elsewhere).
+                // Deliberately small adjustments (±1) and bounded (r ≥ 1).
+                // Can be disabled at runtime via `info.toggles.disable_lmr_tweaks`
+                // (selfplay binary, keys lmr_a / lmr_b for SPRT matches):
+                // when active, we keep only the BASE reduction, without the
+                // enrichment adjustments — this is exactly what we are testing.
                 if !info.toggles.disable_lmr_tweaks {
                     let is_pv = beta - alpha > 1;
                     if !improving                       { r += 1; }
                     if is_pv                            { r -= 1; }
                     if is_killer_move || is_countermove { r -= 1; }
                 }
-                r = r.max(1); // au moins 1 de réduction quand la LMR s'applique
+                r = r.max(1); // at least 1 of reduction when LMR applies
 
                 ((full_depth - r).max(1), true)
             } else {
                 (full_depth, false)
             };
 
-            // --- Étape 1 : sonde à fenêtre nulle (profondeur réduite si LMR) ---
+            // --- Step 1: null-window probe (reduced depth if LMR) ---
             let mut s = -alpha_beta(
                 board,
                 probe_depth,
@@ -1514,10 +1514,10 @@ pub fn alpha_beta(
                 &[],
             );
 
-            // --- Étape 2 : reconfirmation à pleine profondeur (fenêtre nulle) ---
-            // Uniquement si une réduction a été appliquée ET que la sonde a
-            // dépassé alpha — sinon cette étape est inutile (sans réduction,
-            // l'étape 1 était déjà à full_depth, identique au coup n°1).
+            // --- Step 2: reconfirmation at full depth (null window) ---
+            // Only if a reduction was applied AND the probe
+            // exceeded alpha — otherwise this step is unnecessary (without a reduction,
+            // step 1 was already at full_depth, identical to move #1).
             if reduced && s > alpha {
                 s = -alpha_beta(
                     board,
@@ -1533,9 +1533,9 @@ pub fn alpha_beta(
                 );
             }
 
-            // --- Étape 3 : re-recherche à pleine fenêtre (vraie PV) ---
-            // Le coup dépasse réellement alpha et reste sous beta : il fait
-            // partie de la variante principale, on a besoin de son score exact.
+            // --- Step 3: re-search with full window (true PV) ---
+            // The move genuinely exceeds alpha and stays below beta: it is
+            // part of the principal variation, we need its exact score.
             if s > alpha && s < beta {
                 s = -alpha_beta(
                     board,
@@ -1571,16 +1571,16 @@ pub fn alpha_beta(
             }
         }
 
-        // --- Coupure bêta ---
+        // --- Beta cutoff ---
         if score >= beta {
-            // Mémoriser le killer move et mettre à jour l'historique.
-            // moves[..move_index] contient les coups examinés avant mv,
-            // dans l'ordre du tri paresseux (du meilleur score au pire) —
-            // SAUF ceux marqués lmp_pruned[i] : ces coups n'ont jamais été
-            // réellement recherchés (Late Move Pruning les a sautés), ils ne
-            // doivent donc pas être traités comme des échecs par
-            // history.update_bad() (voir le commentaire au-dessus de la
-            // déclaration de lmp_pruned, plus haut dans cette fonction).
+            // Remember the killer move and update the history.
+            // moves[..move_index] contains the moves examined before mv,
+            // in lazy sort order (from best score to worst) —
+            // EXCEPT those marked lmp_pruned[i]: these moves were never
+            // actually searched (Late Move Pruning skipped them), so they
+            // must not be treated as failures by
+            // history.update_bad() (see the comment above the
+            // declaration of lmp_pruned, earlier in this function).
             if !mv.flags.is_capture() {
                 killers.store(mv, ply);
                 history.update_good(board, mv, depth);
@@ -1599,7 +1599,7 @@ pub fn alpha_beta(
                 }
             }
 
-            // Stocker en TT comme borne inférieure
+            // Store in TT as a lower bound
             let tt_score = TranspositionTable::adjust_score_for_tt(beta, ply as i32);
             tt.store(board.hash, tt_score, depth, TTFlag::LowerBound, best_move);
 
@@ -1607,15 +1607,15 @@ pub fn alpha_beta(
         }
     }
 
-    // --- Mise à jour de la Correction History (⚠️ à valider SPRT) ---
-    // On apprend l'écart entre le score de recherche et l'éval statique CORRIGÉE
-    // du nœud. `board` est revenu à l'état du nœud (tous les coups annulés) → les
-    // clés `corr_keys_opt` calculées en haut de fonction sont encore valides.
-    // L'apprentissage est PONDÉRÉ PAR `depth` (recherche profonde = plus fiable).
-    // Conditions : correction active (corr_keys_opt est Some, ce qui couvre déjà
-    // hors-échec / ply>0 / hors-SE / toggle), meilleur coup silencieux (éval
-    // positionnelle pertinente), score hors zone de mat. Version simplifiée : les
-    // nœuds à coupure bêta (qui retournent plus haut) ne sont pas mis à jour.
+    // --- Update the Correction History (⚠️ to validate with SPRT) ---
+    // We learn the gap between the search score and the CORRECTED static eval
+    // of the node. `board` has returned to the node's state (all moves undone) → the
+    // `corr_keys_opt` keys computed at the top of the function are still valid.
+    // The learning is WEIGHTED BY `depth` (deeper search = more reliable).
+    // Conditions: correction active (corr_keys_opt is Some, which already covers
+    // not-in-check / ply>0 / not-in-SE / toggle), best move quiet (relevant
+    // positional eval), score outside mate range. Simplified version: the
+    // beta-cutoff nodes (which return earlier) are not updated.
     if let (Some(keys), Some(corrected_eval)) = (&corr_keys_opt, static_eval_opt) {
         let quiet_best = best_move.is_null() || !best_move.flags.is_capture();
         if quiet_best && best_score.abs() < SCORE_MATE - 200 {
@@ -1623,7 +1623,7 @@ pub fn alpha_beta(
         }
     }
 
-    // --- Stocker le résultat dans la table de transposition ---
+    // --- Store the result in the transposition table ---
     let tt_score = TranspositionTable::adjust_score_for_tt(best_score, ply as i32);
     tt.store(board.hash, tt_score, depth, tt_flag, best_move);
 

@@ -1,20 +1,20 @@
 // =============================================================================
 // Vendetta Chess Motor — src/eval/pawns.rs
 //
-// Rôle : Évaluation de la structure de pions.
-//        La structure de pions est fondamentale aux échecs : elle détermine
-//        les plans stratégiques et les forces/faiblesses permanentes.
+// Role: Pawn structure evaluation.
+//        Pawn structure is fundamental in chess: it determines
+//        strategic plans and permanent strengths/weaknesses.
 //
-// Contenu :
-//   - Détection des pions doublés (deux pions sur la même colonne)
-//   - Détection des pions isolés (aucun pion allié sur les colonnes adjacentes)
-//   - Détection des pions passés (aucun pion adverse ne peut les bloquer)
-//   - Score global de structure de pions
+// Contents:
+//   - Detection of doubled pawns (two pawns on the same file)
+//   - Detection of isolated pawns (no allied pawn on adjacent files)
+//   - Detection of passed pawns (no enemy pawn can block them)
+//   - Overall pawn structure score
 //
-// Pénalités et bonus (en centipions) :
-//   - Pion doublé   : -20 (deux pions sur même colonne = faiblesse)
-//   - Pion isolé    : -20 (pas de protection latérale = faiblesse)
-//   - Pion passé    : +20 à +50 selon l'avancement (force stratégique majeure)
+// Penalties and bonuses (in centipawns):
+//   - Doubled pawn : -20 (two pawns on the same file = weakness)
+//   - Isolated pawn : -20 (no lateral protection = weakness)
+//   - Passed pawn   : +20 to +50 depending on advancement (major strategic strength)
 // =============================================================================
 
 use std::sync::OnceLock;
@@ -23,39 +23,39 @@ use crate::utils::types::{Color, Piece};
 use crate::board::state::Board;
 use crate::board::bitboard::{Bitboard, file_mask, rank_mask};
 
-/// Pénalité pour un pion doublé (par pion en trop sur la colonne).
-/// Calibré par Texel Tuning v3 (était -20) — voir material.rs::PIECE_VALUE.
+/// Penalty for a doubled pawn (per extra pawn on the file).
+/// Calibrated by Texel Tuning v3 (was -20) — see material.rs::PIECE_VALUE.
 const DOUBLED_PAWN_PENALTY: i32 = -24;
 
-/// Pénalité pour un pion isolé (sans pion ami sur les colonnes voisines).
-/// Calibré par Texel Tuning v3 (était -20).
+/// Penalty for an isolated pawn (no friendly pawn on neighboring files).
+/// Calibrated by Texel Tuning v3 (was -20).
 const ISOLATED_PAWN_PENALTY: i32 = -19;
 
-/// Bonus pour un pion passé, par rang d'avancement (index = rang 0-7).
-/// Plus le pion est avancé, plus il est dangereux.
-/// Calibré par Texel Tuning v3 (était [0, 5, 10, 20, 35, 60, 100, 0]) —
-/// strictement positif et croissant, contrairement aux tentatives de tuning
-/// précédentes sans calibrage K qui avaient produit un signe incohérent
-/// aux premiers rangs (voir material.rs::PIECE_VALUE pour le contexte complet).
+/// Bonus for a passed pawn, by rank of advancement (index = rank 0-7).
+/// The more advanced the pawn, the more dangerous it is.
+/// Calibrated by Texel Tuning v3 (was [0, 5, 10, 20, 35, 60, 100, 0]) —
+/// strictly positive and increasing, unlike previous tuning attempts
+/// without K calibration that had produced an inconsistent sign
+/// at the first ranks (see material.rs::PIECE_VALUE for the full context).
 const PASSED_PAWN_BONUS: [i32; 8] = [0, 7, 8, 33, 75, 138, 218, 0];
 
 // =============================================================================
-// Table précalculée des masques de pion passé
+// Precomputed table of passed pawn masks
 // =============================================================================
 
-/// Retourne la table `PASSED_PAWN_MASK[color][sq]`.
+/// Returns the table `PASSED_PAWN_MASK[color][sq]`.
 ///
-/// Pour chaque case `sq` et chaque couleur, le masque couvre tous les rangs
-/// "devant" le pion (selon sa couleur) sur la colonne du pion et les deux
-/// colonnes adjacentes. Un pion est passé si `enemy_pawns & mask == 0`.
+/// For each square `sq` and each color, the mask covers all ranks
+/// "in front of" the pawn (depending on its color) on the pawn's file and the two
+/// adjacent files. A pawn is passed if `enemy_pawns & mask == 0`.
 ///
-/// Précalculée une seule fois via OnceLock (thread-safe, zéro overhead ensuite).
-/// Remplace la boucle O(8) `for r in (rank+1)..8 { mask |= rank_mask(r) & files; }`
-/// par un lookup O(1) : un seul accès tableau au lieu de 8 OR + AND bitboard.
+/// Precomputed once via OnceLock (thread-safe, zero overhead afterward).
+/// Replaces the O(8) loop `for r in (rank+1)..8 { mask |= rank_mask(r) & files; }`
+/// with an O(1) lookup: a single array access instead of 8 bitboard OR + AND operations.
 ///
-/// Indices :
-///   [0][sq] = masque pour un pion Blanc à la case sq (rangs supérieurs)
-///   [1][sq] = masque pour un pion Noir  à la case sq (rangs inférieurs)
+/// Indices:
+///   [0][sq] = mask for a White pawn on square sq (higher ranks)
+///   [1][sq] = mask for a Black pawn on square sq (lower ranks)
 #[inline]
 fn get_passed_pawn_mask() -> &'static [[Bitboard; 64]; 2] {
     static TABLE: OnceLock<[[Bitboard; 64]; 2]> = OnceLock::new();
@@ -69,14 +69,14 @@ fn get_passed_pawn_mask() -> &'static [[Bitboard; 64]; 2] {
             let right  = if file < 7 { file_mask(file + 1) } else { 0 };
             let cols   = left | center | right;
 
-            // Blanc : rangs strictement au-dessus du pion
+            // White: ranks strictly above the pawn
             let mut wm = 0u64;
             for r in (rank + 1)..8 {
                 wm |= rank_mask(r) & cols;
             }
             t[0][sq as usize] = wm;
 
-            // Noir : rangs strictement en-dessous du pion
+            // Black: ranks strictly below the pawn
             let mut bm = 0u64;
             for r in 0..rank {
                 bm |= rank_mask(r) & cols;
@@ -87,14 +87,14 @@ fn get_passed_pawn_mask() -> &'static [[Bitboard; 64]; 2] {
     })
 }
 
-/// Évalue la structure de pions pour une couleur donnée.
-/// Retourne un score (positif = bon pour cette couleur).
+/// Evaluates the pawn structure for a given color.
+/// Returns a score (positive = good for this color).
 pub fn pawn_structure_score(board: &Board, color: Color) -> i32 {
     let pawns = board.pieces[color.index()][Piece::Pawn.index()];
     let enemy_pawns = board.pieces[color.opposite().index()][Piece::Pawn.index()];
     let mut score = 0i32;
 
-    // Pour chaque colonne, compter et analyser les pions de cette couleur
+    // For each file, count and analyze the pawns of this color
     for file in 0u8..8 {
         let col_mask = file_mask(file);
         let pawns_on_file = pawns & col_mask;
@@ -102,31 +102,31 @@ pub fn pawn_structure_score(board: &Board, color: Color) -> i32 {
 
         if count == 0 { continue; }
 
-        // --- Pions doublés ---
-        // Si plus d'un pion sur la colonne, pénalité pour les pions en trop.
+        // --- Doubled pawns ---
+        // If more than one pawn on the file, penalty for the extra pawns.
         if count > 1 {
             score += DOUBLED_PAWN_PENALTY * (count - 1);
         }
 
-        // --- Pions isolés ---
-        // Un pion est isolé si aucun pion ami sur les colonnes voisines.
+        // --- Isolated pawns ---
+        // A pawn is isolated if there is no friendly pawn on neighboring files.
         let left_file  = if file > 0 { file_mask(file - 1) } else { 0 };
         let right_file = if file < 7 { file_mask(file + 1) } else { 0 };
         let adjacent   = left_file | right_file;
 
         if pawns & adjacent == 0 {
-            // Tous les pions sur cette colonne sont isolés
+            // All pawns on this file are isolated
             score += ISOLATED_PAWN_PENALTY * count;
         }
 
-        // --- Pions passés ---
-        // Un pion est passé si aucun pion adverse ne se trouve devant lui
-        // sur la même colonne ou les colonnes adjacentes.
+        // --- Passed pawns ---
+        // A pawn is passed if no enemy pawn is in front of it
+        // on the same file or adjacent files.
         //
-        // Optimisation : lookup O(1) dans PASSED_PAWN_MASK au lieu de la boucle
+        // Optimization: O(1) lookup in PASSED_PAWN_MASK instead of the loop
         // O(8) `for r in (rank+1)..8 { mask |= rank_mask(r) & blocking_files; }`.
-        // La table est initialisée une seule fois (OnceLock), puis un simple
-        // accès tableau remplace 8 opérations bitboard par nœud.
+        // The table is initialized once (OnceLock), then a simple
+        // array access replaces 8 bitboard operations per node.
         let ppm = get_passed_pawn_mask();
         let color_idx = color.index();
         let mut bb = pawns_on_file;
@@ -134,7 +134,7 @@ pub fn pawn_structure_score(board: &Board, color: Color) -> i32 {
             let sq = bb.trailing_zeros() as u8;
             bb    &= bb - 1;
 
-            // Masque précalculé : O(1), zéro boucle.
+            // Precomputed mask: O(1), zero loop.
             if enemy_pawns & ppm[color_idx][sq as usize] == 0 {
                 let rank = sq / 8;
                 let advancement = match color {
@@ -150,50 +150,50 @@ pub fn pawn_structure_score(board: &Board, color: Color) -> i32 {
 }
 
 // =============================================================================
-// Pawn hash table — cache de l'évaluation de structure de pions
+// Pawn hash table — cache of the pawn structure evaluation
 // =============================================================================
 //
-// L'évaluation de structure de pions (pions doublés/isolés/passés) ne dépend
-// QUE de la position des pions des deux couleurs — jamais du roi ni des autres
-// pièces (vérifié : pawn_structure_score ne lit que les bitboards de pions).
-// Or les pions bougent rarement : la même structure réapparaît dans une immense
-// proportion des nœuds de recherche. On met donc en cache la valeur calculée,
-// ce qui évite de re-balayer 8 colonnes × 2 couleurs (+ détection de pions
-// passés) à chaque appel d'evaluate().
+// Pawn structure evaluation (doubled/isolated/passed pawns) depends
+// ONLY on the position of the pawns of both colors — never on the king or other
+// pieces (verified: pawn_structure_score only reads the pawn bitboards).
+// Now, pawns rarely move: the same structure reappears in a huge
+// proportion of search nodes. The computed value is therefore cached,
+// which avoids re-scanning 8 files × 2 colors (+ passed pawn
+// detection) on every call to evaluate().
 //
-// CLÉ DU CACHE = la paire de bitboards de pions (blanc, noir) elle-même,
-// vérifiée par comparaison EXACTE lors du lookup. Conséquence : AUCUNE fausse
-// correspondance possible (contrairement à un hash Zobrist tronqué) — une
-// collision d'index provoque au pire un remplacement (recalcul), jamais une
-// valeur erronée. Cette approche n'exige AUCUNE modification de make_move /
-// unmake_move / Board : tout est contenu ici.
+// CACHE KEY = the pair of pawn bitboards (white, black) itself,
+// checked by EXACT comparison during lookup. Consequence: NO false
+// match is possible (unlike a truncated Zobrist hash) — an
+// index collision at worst causes a replacement (recomputation), never a
+// wrong value. This approach requires NO modification to make_move /
+// unmake_move / Board: everything is contained here.
 //
-// VALEUR mise en cache = score BLANC-RELATIF (blanc − noir), indépendant du
-// trait. L'orientation selon le joueur au trait est appliquée APRÈS le lookup,
-// exactement comme avant — donc résultat strictement identique (zéro Elo).
+// CACHED VALUE = WHITE-RELATIVE score (white − black), independent of
+// the side to move. The orientation based on the side to move is applied AFTER the lookup,
+// exactly as before — so the result is strictly identical (zero Elo).
 //
-// Cache THREAD-LOCAL : chaque thread Lazy SMP a le sien (pas de partage, donc
-// pas de synchronisation). Les entrées restent valides indéfiniment (une
-// structure de pions donnée a toujours le même score — les constantes d'éval
-// ne changent pas à l'exécution), donc jamais besoin de vider le cache.
+// THREAD-LOCAL cache: each Lazy SMP thread has its own (no sharing, so
+// no synchronization). Entries remain valid indefinitely (a
+// given pawn structure always has the same score — the eval constants
+// do not change at runtime), so there is never a need to clear the cache.
 
-/// Nombre d'entrées du cache (puissance de 2). 8192 × ~24 octets ≈ 192 Kio par
-/// thread — largement suffisant vu le faible nombre de structures de pions
-/// distinctes rencontrées dans un arbre de recherche.
+/// Number of cache entries (power of 2). 8192 × ~24 bytes ≈ 192 KiB per
+/// thread — largely sufficient given the small number of distinct pawn structures
+/// encountered in a search tree.
 const PAWN_CACHE_SIZE: usize = 1 << 13;
 const PAWN_CACHE_MASK: usize = PAWN_CACHE_SIZE - 1;
 
-/// Une entrée du cache de structure de pions.
+/// A pawn structure cache entry.
 #[derive(Clone, Copy)]
 struct PawnCacheEntry {
-    /// Bitboard des pions blancs (partie de la clé exacte).
+    /// Bitboard of white pawns (part of the exact key).
     white_pawns: u64,
-    /// Bitboard des pions noirs (partie de la clé exacte).
+    /// Bitboard of black pawns (part of the exact key).
     black_pawns: u64,
-    /// Score blanc-relatif (blanc − noir) mémorisé.
+    /// Stored white-relative score (white − black).
     value:       i32,
-    /// false = slot vide (jamais écrit) ; distingue un slot libre d'une entrée
-    /// réelle dont la valeur vaut 0 (position sans pion, par ex.).
+    /// false = empty slot (never written); distinguishes a free slot from a real
+    /// entry whose value is 0 (position with no pawns, for example).
     valid:       bool,
 }
 
@@ -205,14 +205,14 @@ const EMPTY_PAWN_ENTRY: PawnCacheEntry = PawnCacheEntry {
 };
 
 thread_local! {
-    /// Cache thread-local (Vec alloué sur le tas → pas de gros tableau temporaire
-    /// sur la pile à l'initialisation).
+    /// Thread-local cache (Vec allocated on the heap → no large temporary array
+    /// on the stack at initialization).
     static PAWN_CACHE: RefCell<Vec<PawnCacheEntry>> =
         RefCell::new(vec![EMPTY_PAWN_ENTRY; PAWN_CACHE_SIZE]);
 }
 
-/// Mélange les deux bitboards de pions en un index bien distribué (la clé
-/// exacte reste les deux bitboards eux-mêmes, vérifiés au lookup).
+/// Mixes the two pawn bitboards into a well-distributed index (the exact
+/// key remains the two bitboards themselves, verified at lookup).
 #[inline]
 fn pawn_cache_index(white_pawns: u64, black_pawns: u64) -> usize {
     let mut h = white_pawns.wrapping_mul(0x9E37_79B9_7F4A_7C15);
@@ -221,11 +221,11 @@ fn pawn_cache_index(white_pawns: u64, black_pawns: u64) -> usize {
     (h as usize) & PAWN_CACHE_MASK
 }
 
-/// Calcule le différentiel de structure de pions du point de vue du joueur actif.
+/// Computes the pawn structure differential from the active player's point of view.
 ///
-/// Passe d'abord par le cache thread-local (clé = bitboards de pions). En cas de
-/// miss, calcule le score blanc-relatif via pawn_structure_score() et le mémorise.
-/// Le résultat est strictement identique à un calcul direct — seul le coût change.
+/// First goes through the thread-local cache (key = pawn bitboards). On a
+/// miss, computes the white-relative score via pawn_structure_score() and stores it.
+/// The result is strictly identical to a direct computation — only the cost changes.
 pub fn pawn_eval(board: &Board) -> i32 {
     let white_pawns = board.pieces[Color::White.index()][Piece::Pawn.index()];
     let black_pawns = board.pieces[Color::Black.index()][Piece::Pawn.index()];
@@ -235,7 +235,7 @@ pub fn pawn_eval(board: &Board) -> i32 {
         let idx     = pawn_cache_index(white_pawns, black_pawns);
         let entry   = c[idx];
 
-        // Hit : même structure exacte (comparaison des deux bitboards complets).
+        // Hit: exact same structure (comparison of the two full bitboards).
         if entry.valid
             && entry.white_pawns == white_pawns
             && entry.black_pawns == black_pawns
@@ -243,7 +243,7 @@ pub fn pawn_eval(board: &Board) -> i32 {
             return entry.value;
         }
 
-        // Miss : calcul puis mémorisation (remplacement simple en cas de collision).
+        // Miss: computation then storage (simple replacement in case of collision).
         let value = pawn_structure_score(board, Color::White)
                   - pawn_structure_score(board, Color::Black);
         c[idx] = PawnCacheEntry { white_pawns, black_pawns, value, valid: true };

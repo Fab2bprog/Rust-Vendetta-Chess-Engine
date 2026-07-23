@@ -1,24 +1,24 @@
 // =============================================================================
 // Vendetta Chess Motor — src/moves/queen.rs
 //
-// Rôle : Génère tous les pseudo-coups légaux des dames pour une couleur donnée.
-//        La dame combine les mouvements du fou et de la tour : elle peut se
-//        déplacer en ligne droite ET en diagonale.
+// Role: Generates all pseudo-legal queen moves for a given color.
+//        The queen combines the movements of the bishop and the rook: it can
+//        move in a straight line AND diagonally.
 //
-// Contenu :
-//   - Coups silencieux
+// Contents:
+//   - Quiet moves
 //   - Captures
 //
-// Implémentation : on réutilise queen_attacks() qui combine rook_attacks()
-// et bishop_attacks(). Simple, correct, et maintenable.
+// Implementation: we reuse queen_attacks() which combines rook_attacks()
+// and bishop_attacks(). Simple, correct, and maintainable.
 // =============================================================================
 
 use crate::utils::types::{Color, Piece, Move};
 use crate::board::state::Board;
 use crate::board::bitboard::{pop_lsb, queen_attacks};
 
-/// Génère tous les pseudo-coups des dames de la couleur `color`.
-/// Les coups sont ajoutés au vecteur `moves`.
+/// Generates all pseudo-legal queen moves for color `color`.
+/// The moves are added to the `moves` vector.
 pub fn generate_queen_moves(board: &Board, color: Color, moves: &mut crate::moves::MoveList) {
     let mut queens = board.pieces[color.index()][Piece::Queen.index()];
     let own_pieces = board.occupancy[color.index()];
@@ -26,7 +26,7 @@ pub fn generate_queen_moves(board: &Board, color: Color, moves: &mut crate::move
 
     while queens != 0 {
         let from    = pop_lsb(&mut queens);
-        // La dame attaque comme la tour + le fou
+        // The queen attacks like the rook + the bishop
         let attacks = queen_attacks(from, occupied) & !own_pieces;
 
         let mut bb = attacks;

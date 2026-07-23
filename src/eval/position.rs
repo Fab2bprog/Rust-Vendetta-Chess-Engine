@@ -1,20 +1,20 @@
 // =============================================================================
 // Vendetta Chess Motor — src/eval/position.rs
 //
-// Rôle : Tables de positions (Piece-Square Tables).
-//        Chaque table donne un bonus ou malus positionnel à une pièce selon
-//        la case sur laquelle elle se trouve. Ces tables encodent la sagesse
-//        positionnel classique des échecs.
+// Role: Position tables (Piece-Square Tables).
+//        Each table gives a positional bonus or penalty to a piece depending on
+//        the square it is on. These tables encode the classic
+//        positional wisdom of chess.
 //
-// Contenu :
-//   - Tables pour chaque type de pièce (ouverture/milieu de partie)
-//   - Tables pour la finale (le roi doit aller au centre)
-//   - Fonction d'évaluation positionnelle
+// Contents:
+//   - Tables for each piece type (opening/middlegame)
+//   - Endgame tables (the king should go to the center)
+//   - Positional evaluation function
 //
-// Convention :
-//   - Les tables sont définies du point de vue des Blancs (rang 1 en bas)
-//   - Pour les Noirs, on lit la table à l'envers (rang miroir)
-//   - Les valeurs sont en centipions
+// Convention:
+//   - Tables are defined from White's point of view (rank 1 at the bottom)
+//   - For Black, the table is read in reverse (mirrored rank)
+//   - Values are in centipawns
 // =============================================================================
 
 use crate::utils::types::{Color, Piece};
@@ -25,8 +25,8 @@ use crate::eval::tables::{
     KING_MIDDLEGAME_TABLE, KING_ENDGAME_TABLE, mirror_square,
 };
 
-/// Retourne le bonus positionnel d'une pièce sur une case selon la phase.
-/// Délègue aux tables centralisées dans eval::tables.
+/// Returns the positional bonus of a piece on a square depending on the phase.
+/// Delegates to the centralized tables in eval::tables.
 pub fn piece_square_value(piece: Piece, color: Color, sq: u8, is_endgame: bool) -> i32 {
     let idx = if color == Color::White {
         sq as usize
@@ -46,7 +46,7 @@ pub fn piece_square_value(piece: Piece, color: Color, sq: u8, is_endgame: bool) 
     }
 }
 
-/// Calcule le score positionnel total pour une couleur donnée.
+/// Computes the total positional score for a given color.
 pub fn positional_score(board: &Board, color: Color, is_endgame: bool) -> i32 {
     let mut score = 0i32;
 
@@ -62,7 +62,7 @@ pub fn positional_score(board: &Board, color: Color, is_endgame: bool) -> i32 {
     score
 }
 
-/// Calcule le différentiel positionnel du point de vue du joueur actif.
+/// Computes the positional differential from the point of view of the active player.
 pub fn positional_eval(board: &Board, is_endgame: bool) -> i32 {
     let white_score = positional_score(board, Color::White, is_endgame);
     let black_score = positional_score(board, Color::Black, is_endgame);

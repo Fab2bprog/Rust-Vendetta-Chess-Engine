@@ -1,36 +1,36 @@
 // =============================================================================
 // Vendetta Chess Motor — src/eval/threats.rs
 //
-// Rôle : Détection de menaces statiques — pénalise une pièce attaquée par une
-//        pièce adverse de moindre valeur, ou une pièce non défendue attaquée
-//        ("pièce en prise" / "hanging piece").
+// Role: Static threat detection — penalizes a piece attacked by an
+//        opposing piece of lesser value, or an undefended piece attacked
+//        ("hanging piece").
 //
-//        Indépendant de la recherche tactique : aide l'évaluation à reconnaître
-//        une vulnérabilité réelle même quand la quiescence n'a pas encore (ou
-//        ne pourra jamais, à la profondeur courante) exploré la capture qui la
-//        sanctionnerait. Réduit les positions où le moteur sous-estime une
-//        pièce en danger simplement parce que la ligne tactique exacte est
-//        hors de portée de la recherche à cet instant.
+//        Independent of tactical search: helps the evaluation recognize
+//        a real vulnerability even when quiescence search has not yet (or
+//        will never, at the current depth) explored the capture that would
+//        punish it. Reduces positions where the engine underestimates a
+//        piece in danger simply because the exact tactical line is
+//        beyond the reach of the search at that moment.
 //
-// Principe (deux signaux distincts, cumulables) :
-//   1. "Menacée par une pièce moins chère" — un Cavalier/Fou attaqué par un
-//      pion, une Tour attaquée par un pion ou une pièce mineure, une Dame
-//      attaquée par n'importe quoi de moins cher. Dans ces cas, le SEE
-//      favorise presque toujours l'attaquant : peu importe la défense au
-//      sens du contrôle de case, l'échange reste mauvais pour le camp menacé.
-//   2. "En prise" — une pièce (hors pion et roi) attaquée et qu'AUCUNE pièce
-//      amie ne peut reprendre sur sa case. Signal plus généraliste, qui
-//      capture les pièces isolées même quand l'attaquant n'est pas moins cher.
+// Principle (two distinct signals, stackable):
+//   1. "Threatened by a cheaper piece" — a Knight/Bishop attacked by a
+//      pawn, a Rook attacked by a pawn or a minor piece, a Queen
+//      attacked by anything cheaper. In these cases, the SEE
+//      almost always favors the attacker: regardless of the defense in
+//      terms of square control, the exchange remains bad for the threatened side.
+//   2. "Hanging" — a piece (other than pawn and king) attacked and that NO
+//      friendly piece can recapture on its square. A more general signal, which
+//      captures isolated pieces even when the attacker is not cheaper.
 //
-// Simplification volontaire — PAS de SEE complet ici :
-//   Un SEE complet par pièce à CHAQUE appel d'evaluate() serait bien trop
-//   coûteux (evaluate() est appelé à chaque nœud feuille). On se contente
-//   d'un contrôle de case bon marché (bitboards d'attaque déjà nécessaires
-//   ailleurs), cohérent avec le niveau de simplicité de mobility.rs,
-//   king_safety.rs et center.rs. Les pénalités sont volontairement modestes
-//   (un "nudge" évaluatif, pas une ré-estimation du matériel) : la recherche
-//   tactique (SEE, quiescence) reste responsable de la précision réelle
-//   quand elle peut voir la ligne.
+// Deliberate simplification — NOT a full SEE here:
+//   A full SEE per piece at EVERY call to evaluate() would be far too
+//   costly (evaluate() is called at every leaf node). We settle
+//   for a cheap square-control check (attack bitboards already needed
+//   elsewhere), consistent with the level of simplicity of mobility.rs,
+//   king_safety.rs and center.rs. The penalties are deliberately modest
+//   (an evaluative "nudge", not a re-estimation of material): the tactical
+//   search (SEE, quiescence) remains responsible for the actual accuracy
+//   when it can see the line.
 // =============================================================================
 
 use crate::board::state::Board;
@@ -40,27 +40,27 @@ use crate::board::bitboard::{
 };
 use crate::utils::types::{Color, Piece};
 
-/// Pénalité pour une pièce attaquée par une pièce adverse de moindre valeur
-/// (indépendamment de toute défense). Valeur initiale raisonnable — comme le
-/// reste de l'évaluation positionnelle, à affiner par Texel Tuning (v5
-/// éventuelle, voir CLAUDE.md "Chantiers futurs").
+/// Penalty for a piece attacked by an opposing piece of lesser value
+/// (regardless of any defense). Reasonable initial value — like the
+/// rest of the positional evaluation, to be refined via Texel Tuning (possible
+/// v5, see CLAUDE.md "Future work").
 const THREATENED_BY_LESSER_PENALTY: i32 = 25;
 
-/// Pénalité supplémentaire pour une pièce attaquée et totalement non
-/// défendue ("en prise"). Cumulable avec la pénalité ci-dessus si les deux
-/// conditions sont réunies (ex : Tour attaquée par un Cavalier ET non
-/// défendue par ailleurs).
+/// Additional penalty for a piece attacked and totally un
+/// defended ("hanging"). Stackable with the penalty above if both
+/// conditions are met (e.g.: Rook attacked by a Knight AND not
+/// defended otherwise).
 const HANGING_PENALTY: i32 = 20;
 
-/// Bitboard des cases attaquées par TOUTES les pièces de `color` (pions
-/// inclus). Sert de proxy bon marché de "défense" : si `color` attaque une
-/// case, elle peut y reprendre si une de ses pièces y est capturée.
+/// Bitboard of squares attacked by ALL pieces of `color` (pawns
+/// included). Serves as a cheap proxy for "defense": if `color` attacks a
+/// square, it can recapture there if one of its pieces is captured there.
 ///
-/// Volontairement SANS masquer les cases occupées par les propres pièces de
-/// `color` (contrairement à mobility.rs, qui exclut `!own_pieces` pour ne
-/// compter que les cases réellement accessibles) : ici, une case occupée par
-/// une pièce amie ET attaquée par une autre pièce amie est précisément ce qui
-/// définit une case "défendue".
+/// Deliberately WITHOUT masking squares occupied by `color`'s own
+/// pieces (unlike mobility.rs, which excludes `!own_pieces` to only
+/// count squares that are actually accessible): here, a square occupied by
+/// a friendly piece AND attacked by another friendly piece is precisely what
+/// defines a "defended" square.
 fn own_attack_bitboard(board: &Board, color: Color) -> u64 {
     let occupied = board.all_pieces;
     let mut attacks = 0u64;
@@ -108,14 +108,14 @@ fn own_attack_bitboard(board: &Board, color: Color) -> u64 {
     attacks
 }
 
-/// Évalue les menaces subies par `color` (toujours une pénalité, jamais un
-/// bonus — être menacé n'est jamais positif). Retourne un score négatif ou
-/// nul, du point de vue de `color`.
+/// Evaluates the threats faced by `color` (always a penalty, never a
+/// bonus — being threatened is never positive). Returns a negative or
+/// zero score, from `color`'s point of view.
 pub fn threats_score(board: &Board, color: Color) -> i32 {
     let enemy    = color.opposite();
     let occupied = board.all_pieces;
 
-    // --- Attaques adverses, PAR TYPE de pièce (pour comparer les valeurs) ---
+    // --- Opposing attacks, BY piece TYPE (to compare values) ---
     let enemy_pawns = board.pieces[enemy.index()][Piece::Pawn.index()];
     let enemy_pawn_attacks = if enemy == Color::White {
         white_pawn_attacks(enemy_pawns)
@@ -123,7 +123,7 @@ pub fn threats_score(board: &Board, color: Color) -> i32 {
         black_pawn_attacks(enemy_pawns)
     };
 
-    let mut enemy_minor_attacks = 0u64; // Cavaliers + Fous adverses combinés
+    let mut enemy_minor_attacks = 0u64; // Opposing Knights + Bishops combined
     let mut bb = board.pieces[enemy.index()][Piece::Knight.index()];
     while bb != 0 {
         let sq = bb.trailing_zeros() as u8;
@@ -163,29 +163,29 @@ pub fn threats_score(board: &Board, color: Color) -> i32 {
     let enemy_all_attacks = enemy_pawn_attacks | enemy_minor_attacks
         | enemy_rook_attacks | enemy_queen_attacks | enemy_king_attacks;
 
-    // --- Cases défendues par MON propre camp ---
+    // --- Squares defended by MY own side ---
     let my_defended = own_attack_bitboard(board, color);
 
     let mut score = 0i32;
 
-    // --- Signal 1 : menacée par une pièce de moindre valeur ---
+    // --- Signal 1: threatened by a piece of lesser value ---
 
-    // Cavaliers/Fous menacés par un pion adverse.
+    // Knights/Bishops threatened by an opposing pawn.
     let my_minors = board.pieces[color.index()][Piece::Knight.index()]
         | board.pieces[color.index()][Piece::Bishop.index()];
     score -= (my_minors & enemy_pawn_attacks).count_ones() as i32 * THREATENED_BY_LESSER_PENALTY;
 
-    // Tours menacées par un pion ou une pièce mineure adverse.
+    // Rooks threatened by an opposing pawn or minor piece.
     let my_rooks = board.pieces[color.index()][Piece::Rook.index()];
     let rook_threats = enemy_pawn_attacks | enemy_minor_attacks;
     score -= (my_rooks & rook_threats).count_ones() as i32 * THREATENED_BY_LESSER_PENALTY;
 
-    // Dame menacée par n'importe quelle pièce moins chère qu'elle.
+    // Queen threatened by any piece cheaper than it.
     let my_queens = board.pieces[color.index()][Piece::Queen.index()];
     let queen_threats = enemy_pawn_attacks | enemy_minor_attacks | enemy_rook_attacks;
     score -= (my_queens & queen_threats).count_ones() as i32 * THREATENED_BY_LESSER_PENALTY;
 
-    // --- Signal 2 : pièce en prise (attaquée ET non défendue), hors pion/roi ---
+    // --- Signal 2: hanging piece (attacked AND undefended), excluding pawn/king ---
     let my_pieces_no_king_pawn = board.occupancy[color.index()]
         & !board.pieces[color.index()][Piece::Pawn.index()]
         & !board.pieces[color.index()][Piece::King.index()];
@@ -195,10 +195,10 @@ pub fn threats_score(board: &Board, color: Color) -> i32 {
     score
 }
 
-/// Calcule le différentiel de menaces du point de vue du joueur actif.
-/// Score positif = avantage pour le joueur actif (donc ici, presque toujours
-/// "l'adversaire est plus menacé que moi" — les deux composantes sont des
-/// pénalités, jamais des bonus).
+/// Computes the threat differential from the active player's point of view.
+/// Positive score = advantage for the active player (so here, almost always
+/// "the opponent is more threatened than I am" — both components are
+/// penalties, never bonuses).
 pub fn threats_eval(board: &Board) -> i32 {
     let white_score = threats_score(board, Color::White);
     let black_score = threats_score(board, Color::Black);

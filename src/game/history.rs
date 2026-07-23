@@ -1,67 +1,67 @@
 // =============================================================================
 // Vendetta Chess Motor — src/game/history.rs
 //
-// Rôle : Suivi de l'historique des positions pour la détection de répétition.
-//        La règle des 3 répétitions aux échecs stipule qu'une partie est nulle
-//        si la même position se répète 3 fois (pas nécessairement consécutivement).
+// Role: Tracking position history for repetition detection.
+//        The threefold repetition rule in chess states that a game is drawn
+//        if the same position repeats 3 times (not necessarily consecutively).
 //
-// Contenu :
-//   - PositionHistory : stockage des hashs Zobrist des positions jouées
-//   - count_repetitions() : compte combien de fois la position actuelle
-//     a déjà été rencontrée dans la partie
+// Contents:
+//   - PositionHistory: storage of Zobrist hashes of positions played
+//   - count_repetitions() : counts how many times the current position
+//     has already been encountered in the game
 //
-// Note : On utilise le hash Zobrist comme identifiant de position.
-//        Deux positions identiques ont le même hash (avec une infime probabilité
-//        de collision qui est acceptable en pratique).
+// Note: We use the Zobrist hash as the position identifier.
+//        Two identical positions have the same hash (with a tiny probability
+//        of collision that is acceptable in practice).
 // =============================================================================
 
-/// Historique des positions d'une partie.
+/// History of positions in a game.
 pub struct PositionHistory {
-    /// Liste des hashs Zobrist de toutes les positions jouées.
+    /// List of Zobrist hashes of all positions played.
     hashes: Vec<u64>,
 }
 
 impl PositionHistory {
-    /// Crée un historique vide.
+    /// Creates an empty history.
     pub fn new() -> PositionHistory {
         PositionHistory {
             hashes: Vec::with_capacity(256),
         }
     }
 
-    /// Ajoute la position courante à l'historique.
+    /// Adds the current position to the history.
     pub fn push(&mut self, hash: u64) {
         self.hashes.push(hash);
     }
 
-    /// Retire la dernière position de l'historique (lors d'un unmake_move).
+    /// Removes the last position from the history (during an unmake_move).
     pub fn pop(&mut self) {
         self.hashes.pop();
     }
 
-    /// Compte le nombre de fois que le hash donné apparaît dans l'historique.
-    /// Utilisé pour détecter la répétition de position.
+    /// Counts the number of times the given hash appears in the history.
+    /// Used to detect position repetition.
     pub fn count_occurrences(&self, hash: u64) -> u32 {
         self.hashes.iter().filter(|&&h| h == hash).count() as u32
     }
 
-    /// Retourne true si la position (identifiée par son hash) s'est déjà
-    /// répétée au moins 2 fois (donc cette occurrence serait la 3e → nulle).
+    /// Returns true if the position (identified by its hash) has already
+    /// repeated at least 2 times (so this occurrence would be the 3rd → draw).
     pub fn is_threefold_repetition(&self, hash: u64) -> bool {
         self.count_occurrences(hash) >= 2
     }
 
-    /// Vide l'historique (début d'une nouvelle partie).
+    /// Clears the history (start of a new game).
     pub fn clear(&mut self) {
         self.hashes.clear();
     }
 
-    /// Retourne le nombre de positions dans l'historique.
+    /// Returns the number of positions in the history.
     pub fn len(&self) -> usize {
         self.hashes.len()
     }
 
-    /// Retourne true si l'historique est vide (aucune position enregistrée).
+    /// Returns true if the history is empty (no position recorded).
     pub fn is_empty(&self) -> bool {
         self.hashes.is_empty()
     }

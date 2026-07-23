@@ -1,67 +1,67 @@
 // =============================================================================
 // Vendetta Chess Motor — src/board/bitboard.rs
 //
-// Rôle : Définit le type Bitboard (u64) et toutes les opérations associées.
-//        Un bitboard est un entier 64 bits où chaque bit représente une case
-//        de l'échiquier. Le bit i correspond à la case i (0=a1, 63=h8).
+// Role: Defines the Bitboard type (u64) and all associated operations.
+//        A bitboard is a 64-bit integer where each bit represents a square
+//        of the chessboard. Bit i corresponds to square i (0=a1, 63=h8).
 //
-// Contenu :
-//   - Type Bitboard et alias
-//   - Fonctions de manipulation de bits (set, clear, get, pop, count, lsb)
-//   - Masques de colonnes et de rangs précalculés
-//   - Fonctions d'attaque pour les pièces glissantes (fou, tour, dame)
-//     via Magic Bitboards (O(1) : une multiplication + un décalage + un lookup)
-//   - Tables d'attaque précalculées pour cavalier et roi
+// Contents:
+//   - Bitboard type and alias
+//   - Bit manipulation functions (set, clear, get, pop, count, lsb)
+//   - Precomputed file and rank masks
+//   - Attack functions for sliding pieces (bishop, rook, queen)
+//     via Magic Bitboards (O(1): one multiplication + one shift + one lookup)
+//   - Precomputed attack tables for knight and king
 //
-// Choix technique : les attaques des pièces glissantes (tour, fou, dame)
-// utilisent des Magic Bitboards (module magic.rs). Tables précalculées au
-// démarrage en < 10 ms, accès O(1) pendant la recherche.
+// Technical choice: attacks for sliding pieces (rook, bishop, queen)
+// use Magic Bitboards (magic.rs module). Tables precomputed at
+// startup in < 10 ms, O(1) access during search.
 // =============================================================================
 
 use std::sync::OnceLock;
 use super::magic::{init_magic_tables, rook_attacks_magic, bishop_attacks_magic};
 
-/// Type Bitboard : entier 64 bits représentant un ensemble de cases.
-/// Bit i = 1 signifie que la case i est dans l'ensemble.
+/// Bitboard type: 64-bit integer representing a set of squares.
+/// Bit i = 1 means that square i is in the set.
 pub type Bitboard = u64;
 
 // =============================================================================
-// Opérations de base sur les bits
+// Basic bit operations
 // =============================================================================
 
-/// Active le bit correspondant à la case `sq`.
+/// Sets the bit corresponding to square `sq`.
 #[inline]
 pub fn set_bit(bb: &mut Bitboard, sq: u8) {
     *bb |= 1u64 << sq;
 }
 
-/// Désactive le bit correspondant à la case `sq`.
+/// Clears the bit corresponding to square `sq`.
 #[inline]
 pub fn clear_bit(bb: &mut Bitboard, sq: u8) {
     *bb &= !(1u64 << sq);
 }
 
-/// Retourne true si le bit de la case `sq` est activé.
+/// Returns true if the bit for square `sq` is set.
 #[inline]
 pub fn get_bit(bb: Bitboard, sq: u8) -> bool {
     (bb >> sq) & 1 == 1
 }
 
-/// Retourne le nombre de bits activés (popcount).
+/// Returns the number of set bits (popcount).
 #[inline]
 pub fn count_bits(bb: Bitboard) -> u32 {
     bb.count_ones()
 }
 
-/// Retourne l'index du bit le moins significatif (LSB).
-/// Précondition : bb != 0.
+/// Returns the index of the least significant bit (LSB).
+/// Precondition: bb != 0.
 #[inline]
 pub fn lsb(bb: Bitboard) -> u8 {
     bb.trailing_zeros() as u8
 }
 
-/// Retourne l'index du LSB et le désactive dans le bitboard.
-/// Précondition : bb != 0.
+/// Returns the index of the LSB and clears it in the bitboard.
+/// Precondition: bb != 0.
 #[inline]
 pub fn pop_lsb(bb: &mut Bitboard) -> u8 {
     let sq = lsb(*bb);
@@ -70,55 +70,55 @@ pub fn pop_lsb(bb: &mut Bitboard) -> u8 {
 }
 
 // =============================================================================
-// Masques de colonnes (files) et de rangs (ranks)
+// File and rank masks
 // =============================================================================
 
-/// Masque de la colonne a (colonne 0).
+/// Mask for file a (file 0).
 pub const FILE_A: Bitboard = 0x0101_0101_0101_0101;
-/// Masque de la colonne b (colonne 1).
+/// Mask for file b (file 1).
 pub const FILE_B: Bitboard = 0x0202_0202_0202_0202;
-/// Masque de la colonne g (colonne 6).
+/// Mask for file g (file 6).
 pub const FILE_G: Bitboard = 0x4040_4040_4040_4040;
-/// Masque de la colonne h (colonne 7).
+/// Mask for file h (file 7).
 pub const FILE_H: Bitboard = 0x8080_8080_8080_8080;
 
-/// Masque du rang 1 (rang 0).
+/// Mask for rank 1 (rank 0).
 pub const RANK_1: Bitboard = 0x0000_0000_0000_00FF;
-/// Masque du rang 2 (rang 1).
+/// Mask for rank 2 (rank 1).
 pub const RANK_2: Bitboard = 0x0000_0000_0000_FF00;
-/// Masque du rang 7 (rang 6).
+/// Mask for rank 7 (rank 6).
 pub const RANK_7: Bitboard = 0x00FF_0000_0000_0000;
-/// Masque du rang 8 (rang 7).
+/// Mask for rank 8 (rank 7).
 pub const RANK_8: Bitboard = 0xFF00_0000_0000_0000;
 
-/// Retourne le masque de la colonne donnée (0=a, 7=h).
+/// Returns the mask for the given file (0=a, 7=h).
 #[inline]
 pub fn file_mask(file: u8) -> Bitboard {
     FILE_A << file
 }
 
-/// Retourne le masque du rang donné (0=rang1, 7=rang8).
+/// Returns the mask for the given rank (0=rank1, 7=rank8).
 #[inline]
 pub fn rank_mask(rank: u8) -> Bitboard {
     RANK_1 << (rank * 8)
 }
 
 // =============================================================================
-// Tables d'attaque précalculées pour cavalier et roi
-// Ces tables sont calculées une seule fois au démarrage (voir init_attack_tables).
+// Precomputed attack tables for knight and king
+// These tables are computed only once at startup (see init_attack_tables).
 // =============================================================================
 
-/// Tables d'attaque précalculées — thread-safe via OnceLock.
-/// Une fois initialisées, elles sont en lecture seule pour tous les threads.
+/// Precomputed attack tables — thread-safe via OnceLock.
+/// Once initialized, they are read-only for all threads.
 static KNIGHT_ATTACKS_TABLE: OnceLock<[Bitboard; 64]> = OnceLock::new();
 static KING_ATTACKS_TABLE:   OnceLock<[Bitboard; 64]> = OnceLock::new();
 
-/// Initialise toutes les tables d'attaque précalculées :
-///   - Cavalier et roi (tables OnceLock simples)
-///   - Tour et fou via Magic Bitboards (tables OnceLock dans magic.rs)
+/// Initializes all precomputed attack tables:
+///   - Knight and king (simple OnceLock tables)
+///   - Rook and bishop via Magic Bitboards (OnceLock tables in magic.rs)
 ///
-/// Doit être appelée une seule fois au démarrage, avant tout threading.
-/// Toutes les initialisations sont idempotentes et thread-safe (OnceLock).
+/// Must be called only once at startup, before any threading.
+/// All initializations are idempotent and thread-safe (OnceLock).
 pub fn init_attack_tables() {
     KNIGHT_ATTACKS_TABLE.get_or_init(|| {
         let mut table = [0u64; 64];
@@ -134,57 +134,57 @@ pub fn init_attack_tables() {
         }
         table
     });
-    // Tables magiques pour les pièces glissantes (tour et fou)
+    // Magic tables for sliding pieces (rook and bishop)
     init_magic_tables();
 }
 
-/// Calcule les cases attaquées par un cavalier sur la case `sq`.
+/// Computes the squares attacked by a knight on square `sq`.
 fn compute_knight_attacks(sq: u8) -> Bitboard {
     let bb: Bitboard = 1u64 << sq;
     let mut attacks: Bitboard = 0;
 
-    // Les 8 déplacements possibles du cavalier, en évitant les débordements de bord.
-    // Nord-Nord-Est : +17, pas si colonne h
+    // The 8 possible knight moves, avoiding edge wraparound.
+    // North-North-East: +17, not if file h
     attacks |= (bb << 17) & !FILE_A;
-    // Nord-Nord-Ouest : +15, pas si colonne a
+    // North-North-West: +15, not if file a
     attacks |= (bb << 15) & !FILE_H;
-    // Nord-Est-Est : +10, pas si colonnes g ou h
+    // North-East-East: +10, not if file g or h
     attacks |= (bb << 10) & !(FILE_A | FILE_B);
-    // Nord-Ouest-Ouest : +6, pas si colonnes a ou b
+    // North-West-West: +6, not if file a or b
     attacks |= (bb << 6)  & !(FILE_G | FILE_H);
-    // Sud-Sud-Est : -15, pas si colonne h
+    // South-South-East: -15, not if file h
     attacks |= (bb >> 15) & !FILE_A;
-    // Sud-Sud-Ouest : -17, pas si colonne a
+    // South-South-West: -17, not if file a
     attacks |= (bb >> 17) & !FILE_H;
-    // Sud-Est-Est : -6, pas si colonnes g ou h
+    // South-East-East: -6, not if file g or h
     attacks |= (bb >> 6)  & !(FILE_A | FILE_B);
-    // Sud-Ouest-Ouest : -10, pas si colonnes a ou b
+    // South-West-West: -10, not if file a or b
     attacks |= (bb >> 10) & !(FILE_G | FILE_H);
 
     attacks
 }
 
-/// Calcule les cases attaquées par un roi sur la case `sq`.
+/// Computes the squares attacked by a king on square `sq`.
 fn compute_king_attacks(sq: u8) -> Bitboard {
     let bb: Bitboard = 1u64 << sq;
     let mut attacks: Bitboard = 0;
 
-    // Les 8 directions du roi, en évitant les débordements de bord.
-    attacks |= bb << 8;                      // Nord
-    attacks |= bb >> 8;                      // Sud
-    attacks |= (bb << 1) & !FILE_A;         // Est
-    attacks |= (bb >> 1) & !FILE_H;         // Ouest
-    attacks |= (bb << 9) & !FILE_A;         // Nord-Est
-    attacks |= (bb << 7) & !FILE_H;         // Nord-Ouest
-    attacks |= (bb >> 7) & !FILE_A;         // Sud-Est
-    attacks |= (bb >> 9) & !FILE_H;         // Sud-Ouest
+    // The 8 king directions, avoiding edge wraparound.
+    attacks |= bb << 8;                      // North
+    attacks |= bb >> 8;                      // South
+    attacks |= (bb << 1) & !FILE_A;         // East
+    attacks |= (bb >> 1) & !FILE_H;         // West
+    attacks |= (bb << 9) & !FILE_A;         // North-East
+    attacks |= (bb << 7) & !FILE_H;         // North-West
+    attacks |= (bb >> 7) & !FILE_A;         // South-East
+    attacks |= (bb >> 9) & !FILE_H;         // South-West
 
     attacks
 }
 
-/// Retourne le bitboard des cases attaquées par un cavalier sur la case `sq`.
-/// Thread-safe : lecture seule depuis OnceLock initialisé au démarrage.
-/// Précondition : sq < 64 (garanti par pop_lsb / lsb appelés sur un bitboard non nul).
+/// Returns the bitboard of squares attacked by a knight on square `sq`.
+/// Thread-safe: read-only from OnceLock initialized at startup.
+/// Precondition: sq < 64 (guaranteed by pop_lsb / lsb called on a non-zero bitboard).
 #[inline]
 pub fn knight_attacks(sq: u8) -> Bitboard {
     debug_assert!(sq < 64, "knight_attacks : case invalide sq={} (doit être 0-63)", sq);
@@ -192,9 +192,9 @@ pub fn knight_attacks(sq: u8) -> Bitboard {
         .expect("init_attack_tables() non appelée")[sq as usize]
 }
 
-/// Retourne le bitboard des cases attaquées par un roi sur la case `sq`.
-/// Thread-safe : lecture seule depuis OnceLock initialisé au démarrage.
-/// Précondition : sq < 64 (garanti par king_square, lui-même protégé par from_fen).
+/// Returns the bitboard of squares attacked by a king on square `sq`.
+/// Thread-safe: read-only from OnceLock initialized at startup.
+/// Precondition: sq < 64 (guaranteed by king_square, itself protected by from_fen).
 #[inline]
 pub fn king_attacks(sq: u8) -> Bitboard {
     debug_assert!(sq < 64, "king_attacks : case invalide sq={} (doit être 0-63)", sq);
@@ -203,52 +203,52 @@ pub fn king_attacks(sq: u8) -> Bitboard {
 }
 
 // =============================================================================
-// Attaques des pièces glissantes (approche classique par boucle)
+// Sliding piece attacks (classic loop-based approach)
 //
-// Pour chaque pièce glissante, on explore chaque direction jusqu'à rencontrer
-// une pièce bloquante ou le bord de l'échiquier. La case bloquante est incluse
-// (car on peut capturer) mais on s'arrête là.
+// For each sliding piece, we explore each direction until encountering
+// a blocking piece or the edge of the board. The blocking square is included
+// (since it can be captured) but we stop there.
 // =============================================================================
 
-/// Retourne les cases attaquées par une tour sur la case `sq`
-/// avec le bitboard `occupied` représentant toutes les pièces présentes.
+/// Returns the squares attacked by a rook on square `sq`
+/// with the bitboard `occupied` representing all pieces present.
 ///
-/// Implémentation Magic Bitboards : O(1) — multiplication + décalage + lookup.
-/// 5 à 20× plus rapide que la version classique par boucle.
+/// Magic Bitboards implementation: O(1) — multiplication + shift + lookup.
+/// 5 to 20x faster than the classic loop-based version.
 #[inline]
 pub fn rook_attacks(sq: u8, occupied: Bitboard) -> Bitboard {
     rook_attacks_magic(sq, occupied)
 }
 
-/// Retourne les cases attaquées par un fou sur la case `sq`
-/// avec le bitboard `occupied` représentant toutes les pièces présentes.
+/// Returns the squares attacked by a bishop on square `sq`
+/// with the bitboard `occupied` representing all pieces present.
 ///
-/// Implémentation Magic Bitboards : O(1) — multiplication + décalage + lookup.
-/// 5 à 20× plus rapide que la version classique par boucle.
+/// Magic Bitboards implementation: O(1) — multiplication + shift + lookup.
+/// 5 to 20x faster than the classic loop-based version.
 #[inline]
 pub fn bishop_attacks(sq: u8, occupied: Bitboard) -> Bitboard {
     bishop_attacks_magic(sq, occupied)
 }
 
-/// Calcule les cases attaquées par une dame sur la case `sq`.
-/// La dame combine les attaques de la tour et du fou.
+/// Computes the squares attacked by a queen on square `sq`.
+/// The queen combines the attacks of the rook and the bishop.
 #[inline]
 pub fn queen_attacks(sq: u8, occupied: Bitboard) -> Bitboard {
     rook_attacks(sq, occupied) | bishop_attacks(sq, occupied)
 }
 
 // =============================================================================
-// Attaques des pions
-// Les pions n'attaquent pas comme ils avancent, donc on les gère séparément.
+// Pawn attacks
+// Pawns do not attack the way they advance, so they are handled separately.
 // =============================================================================
 
-/// Calcule les cases attaquées par les pions blancs (vers le haut du plateau).
+/// Computes the squares attacked by white pawns (toward the top of the board).
 #[inline]
 pub fn white_pawn_attacks(pawns: Bitboard) -> Bitboard {
     ((pawns << 9) & !FILE_A) | ((pawns << 7) & !FILE_H)
 }
 
-/// Calcule les cases attaquées par les pions noirs (vers le bas du plateau).
+/// Computes the squares attacked by black pawns (toward the bottom of the board).
 #[inline]
 pub fn black_pawn_attacks(pawns: Bitboard) -> Bitboard {
     ((pawns >> 7) & !FILE_A) | ((pawns >> 9) & !FILE_H)
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn test_cavalier_centre() {
         init_attack_tables();
-        // Un cavalier en e4 (sq=28) attaque 8 cases
+        // A knight on e4 (sq=28) attacks 8 squares
         let attacks = knight_attacks(28);
         assert_eq!(count_bits(attacks), 8);
     }
@@ -286,29 +286,29 @@ mod tests {
     #[test]
     fn test_cavalier_coin() {
         init_attack_tables();
-        // Un cavalier en a1 (sq=0) attaque 2 cases
+        // A knight on a1 (sq=0) attacks 2 squares
         let attacks = knight_attacks(0);
         assert_eq!(count_bits(attacks), 2);
     }
 
     #[test]
     fn test_tour_echiquier_vide() {
-        // init OBLIGATOIRE : rook_attacks délègue aux magic bitboards, qui
-        // paniquent si init_magic_tables() (appelée par init_attack_tables())
-        // n'a pas tourné. Sans cette ligne, le test dépendait de l'ordre
-        // d'exécution parallèle des tests (flaky, panic possible) — rendu
-        // autonome ici, comme les tests cavalier ci-dessus.
+        // init MANDATORY: rook_attacks delegates to the magic bitboards, which
+        // panic if init_magic_tables() (called by init_attack_tables())
+        // has not run. Without this line, the test depended on the parallel
+        // execution order of the tests (flaky, panic possible) — made
+        // self-contained here, like the knight tests above.
         init_attack_tables();
-        // Une tour en e4 (sq=28) sur échiquier vide attaque 14 cases
+        // A rook on e4 (sq=28) on an empty board attacks 14 squares
         let attacks = rook_attacks(28, 0);
         assert_eq!(count_bits(attacks), 14);
     }
 
     #[test]
     fn test_fou_echiquier_vide() {
-        // init OBLIGATOIRE (même raison que test_tour_echiquier_vide).
+        // init MANDATORY (same reason as test_tour_echiquier_vide).
         init_attack_tables();
-        // Un fou en e4 (sq=28) sur échiquier vide attaque 13 cases
+        // A bishop on e4 (sq=28) on an empty board attacks 13 squares
         let attacks = bishop_attacks(28, 0);
         assert_eq!(count_bits(attacks), 13);
     }

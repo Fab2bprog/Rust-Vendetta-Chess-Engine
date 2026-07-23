@@ -1,21 +1,21 @@
 // =============================================================================
 // Vendetta Chess Motor — src/board/state.rs
 //
-// Rôle : Représentation complète de l'état d'une position d'échecs.
-//        C'est la structure centrale du moteur autour de laquelle tout s'articule.
+// Role: Complete representation of a chess position's state.
+//        It is the central structure of the engine around which everything revolves.
 //
-// Contenu :
-//   - CastlingRights : droits de roque encodés en 4 bits
-//   - BoardState : état irréversible sauvegardé avant chaque coup
-//     (pour pouvoir annuler un coup — "unmake move")
-//   - Board : structure principale avec 12 bitboards, état complet, hash Zobrist
-//   - Lecture/écriture FEN
+// Contents:
+//   - CastlingRights: castling rights encoded in 4 bits
+//   - BoardState: irreversible state saved before each move
+//     (to be able to undo a move — "unmake move")
+//   - Board: main structure with 12 bitboards, complete state, Zobrist hash
+//   - FEN reading/writing
 //   - make_move / unmake_move
-//   - Hachage Zobrist (identification unique d'une position)
+//   - Zobrist hashing (unique identification of a position)
 //
-// Choix technique : on utilise 12 bitboards (6 types × 2 couleurs) pour
-// représenter toutes les pièces, plus 2 bitboards d'occupation (une par couleur)
-// et 1 bitboard global pour la rapidité des opérations.
+// Technical choice: we use 12 bitboards (6 types × 2 colors) to
+// represent all the pieces, plus 2 occupancy bitboards (one per color)
+// and 1 global bitboard for speed of operations.
 // =============================================================================
 
 use crate::utils::types::{Color, Piece, Move, MoveFlags, file_of, rank_of, make_square, square_from_str};
@@ -26,14 +26,14 @@ use crate::board::bitboard::{
 use crate::eval::tables::piece_square_values;
 
 // =============================================================================
-// Droits de roque
+// Castling rights
 // =============================================================================
 
-/// Droits de roque encodés en 4 bits :
-/// - bit 0 : petit roque blanc (côté roi)
-/// - bit 1 : grand roque blanc (côté dame)
-/// - bit 2 : petit roque noir (côté roi)
-/// - bit 3 : grand roque noir (côté dame)
+/// Castling rights encoded in 4 bits:
+/// - bit 0: white kingside castling (king side)
+/// - bit 1: white queenside castling (queen side)
+/// - bit 2: black kingside castling (king side)
+/// - bit 3: black queenside castling (queen side)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CastlingRights(pub u8);
 
@@ -46,7 +46,7 @@ impl CastlingRights {
     pub const BLACK_KINGSIDE:  u8 = 0b0100;
     pub const BLACK_QUEENSIDE: u8 = 0b1000;
 
-    /// Retourne true si le petit roque est disponible pour la couleur donnée.
+    /// Returns true if kingside castling is available for the given color.
     #[inline]
     pub fn can_castle_kingside(self, color: Color) -> bool {
         let flag = if color == Color::White {
@@ -57,7 +57,7 @@ impl CastlingRights {
         self.0 & flag != 0
     }
 
-    /// Retourne true si le grand roque est disponible pour la couleur donnée.
+    /// Returns true if queenside castling is available for the given color.
     #[inline]
     pub fn can_castle_queenside(self, color: Color) -> bool {
         let flag = if color == Color::White {
@@ -68,133 +68,133 @@ impl CastlingRights {
         self.0 & flag != 0
     }
 
-    /// Retire les droits de roque associés à une case (appelé quand une pièce bouge).
+    /// Removes the castling rights associated with a square (called when a piece moves).
     #[inline]
     pub fn remove_rights_for_square(&mut self, sq: u8) {
-        // Si le roi ou la tour bouge, on retire les droits correspondants.
+        // If the king or rook moves, remove the corresponding rights.
         let mask = CASTLING_RIGHTS_MASK[sq as usize];
         self.0 &= !mask;
     }
 }
 
-/// Masque de mise à jour des droits de roque pour chaque case.
-/// Si une pièce bouge depuis (ou vers) cette case, on retire ces droits.
+/// Castling rights update mask for each square.
+/// If a piece moves from (or to) this square, these rights are removed.
 const CASTLING_RIGHTS_MASK: [u8; 64] = {
     let mut mask = [0u8; 64];
-    // Tour blanche côté roi : h1 = case 7
+    // White rook king side: h1 = square 7
     mask[7]  = CastlingRights::WHITE_KINGSIDE;
-    // Tour blanche côté dame : a1 = case 0
+    // White rook queen side: a1 = square 0
     mask[0]  = CastlingRights::WHITE_QUEENSIDE;
-    // Roi blanc : e1 = case 4
+    // White king: e1 = square 4
     mask[4]  = CastlingRights::WHITE_KINGSIDE | CastlingRights::WHITE_QUEENSIDE;
-    // Tour noire côté roi : h8 = case 63
+    // Black rook king side: h8 = square 63
     mask[63] = CastlingRights::BLACK_KINGSIDE;
-    // Tour noire côté dame : a8 = case 56
+    // Black rook queen side: a8 = square 56
     mask[56] = CastlingRights::BLACK_QUEENSIDE;
-    // Roi noir : e8 = case 60
+    // Black king: e8 = square 60
     mask[60] = CastlingRights::BLACK_KINGSIDE | CastlingRights::BLACK_QUEENSIDE;
     mask
 };
 
 // =============================================================================
-// État irréversible (sauvegardé pour annuler un coup)
+// Irreversible state (saved to undo a move)
 // =============================================================================
 
-/// Informations irréversibles de la position, sauvegardées avant chaque coup.
-/// Permettent de restaurer exactement l'état précédent lors d'un unmake_move.
+/// Irreversible position information, saved before each move.
+/// Allow restoring exactly the previous state during an unmake_move.
 #[derive(Clone, Copy, Debug)]
 pub struct BoardState {
-    /// Droits de roque avant le coup.
+    /// Castling rights before the move.
     pub castling: CastlingRights,
-    /// Case cible de la prise en passant avant le coup (None si aucune).
+    /// En passant target square before the move (None if none).
     pub en_passant: Option<u8>,
-    /// Compteur des demi-coups pour la règle des 50 coups avant ce coup.
+    /// Halfmove counter for the 50-move rule before this move.
     pub halfmove_clock: u32,
-    /// Pièce capturée (None si coup silencieux).
+    /// Captured piece (None if a quiet move).
     pub captured_piece: Option<Piece>,
-    /// Hash Zobrist avant le coup.
+    /// Zobrist hash before the move.
     pub hash: u64,
 }
 
 // =============================================================================
-// Structure principale : Board
+// Main structure: Board
 // =============================================================================
 
-/// Représentation complète d'une position d'échecs.
+/// Complete representation of a chess position.
 ///
-/// Utilise 12 bitboards (6 types de pièces × 2 couleurs) pour représenter
-/// toutes les pièces. Des bitboards d'occupation dérivés permettent d'accélérer
-/// les opérations fréquentes.
+/// Uses 12 bitboards (6 piece types × 2 colors) to represent
+/// all the pieces. Derived occupancy bitboards help speed up
+/// frequent operations.
 ///
-/// Clone est dérivé pour permettre au Lazy SMP de donner à chaque thread
-/// sa propre copie indépendante du plateau.
+/// Clone is derived to allow Lazy SMP to give each thread
+/// its own independent copy of the board.
 #[derive(Clone)]
 pub struct Board {
-    /// Bitboards des pièces : pieces[couleur][type_pièce].
-    /// couleur : 0=Blanc, 1=Noir
-    /// type_pièce : 0=Pion, 1=Cavalier, 2=Fou, 3=Tour, 4=Dame, 5=Roi
+    /// Piece bitboards: pieces[color][piece_type].
+    /// color: 0=White, 1=Black
+    /// piece_type: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
     pub pieces: [[Bitboard; 6]; 2],
 
-    /// Bitboard d'occupation par couleur : toutes les pièces d'une couleur.
+    /// Occupancy bitboard per color: all pieces of one color.
     pub occupancy: [Bitboard; 2],
 
-    /// Bitboard de toutes les pièces (toutes couleurs confondues).
+    /// Bitboard of all pieces (all colors combined).
     pub all_pieces: Bitboard,
 
-    /// Couleur du joueur qui doit jouer.
+    /// Color of the player to move.
     pub side_to_move: Color,
 
-    /// Droits de roque actuels.
+    /// Current castling rights.
     pub castling: CastlingRights,
 
-    /// Case cible de la prise en passant (None si aucune prise en passant possible).
+    /// En passant target square (None if no en passant capture is possible).
     pub en_passant: Option<u8>,
 
-    /// Compteur de demi-coups pour la règle des 50 coups.
-    /// Remis à zéro après une capture ou un mouvement de pion.
+    /// Halfmove counter for the 50-move rule.
+    /// Reset to zero after a capture or a pawn move.
     pub halfmove_clock: u32,
 
-    /// Numéro du coup complet (commence à 1, incrémenté après le coup des Noirs).
+    /// Full move number (starts at 1, incremented after Black's move).
     pub fullmove_number: u32,
 
-    /// Hash Zobrist de la position courante (identifiant unique).
+    /// Zobrist hash of the current position (unique identifier).
     pub hash: u64,
 
-    /// Score incrémental matériel + PST en milieu de partie, perspective Blanc.
-    /// Blanc − Noir : positif = avantage Blanc.
-    /// Mis à jour dans place_piece() et remove_piece() à chaque coup.
+    /// Incremental material + PST score in the middlegame, White's perspective.
+    /// White − Black: positive = White advantage.
+    /// Updated in place_piece() and remove_piece() on every move.
     pub eval_mg: i32,
 
-    /// Score incrémental matériel + PST en finale, perspective Blanc.
-    /// Même convention que eval_mg.
+    /// Incremental material + PST score in the endgame, White's perspective.
+    /// Same convention as eval_mg.
     pub eval_eg: i32,
 
-    /// Compteur de pièces par couleur et type : piece_count[couleur][type_pièce].
-    /// Indices : couleur 0=Blanc 1=Noir ; type 0=Pion 1=Cavalier 2=Fou 3=Tour 4=Dame 5=Roi.
-    /// Mis à jour dans place_piece() (+1) et remove_piece() (-1).
+    /// Piece count per color and type: piece_count[color][piece_type].
+    /// Indices: color 0=White 1=Black; type 0=Pawn 1=Knight 2=Bishop 3=Rook 4=Queen 5=King.
+    /// Updated in place_piece() (+1) and remove_piece() (-1).
     ///
-    /// Permet à is_insufficient_material() de remplacer 10 appels count_ones()
-    /// par 10 lectures de u8 — ~10× moins cher, appelé à chaque nœud alpha-bêta.
-    /// u8 suffit : maximum théorique = 9 pions après promotion, jamais > 255.
+    /// Allows is_insufficient_material() to replace 10 count_ones() calls
+    /// with 10 u8 reads — ~10× cheaper, called at every alpha-beta node.
+    /// u8 is enough: theoretical maximum = 9 pawns after promotion, never > 255.
     pub piece_count: [[u8; 6]; 2],
 
-    /// Mailbox : pièce présente sur chaque case (None = case vide), indexé par
-    /// case (0..63). Maintenu incrémentalement dans place_piece()/remove_piece()
-    /// — les SEULS points de mutation des bitboards de pièces (vérifié : aucune
-    /// écriture directe des bitboards ailleurs dans le code).
+    /// Mailbox: piece present on each square (None = empty square), indexed by
+    /// square (0..63). Maintained incrementally in place_piece()/remove_piece()
+    /// — the ONLY mutation points for piece bitboards (verified: no
+    /// direct bitboard writes elsewhere in the code).
     ///
-    /// But : rendre piece_at() O(1) (une lecture indexée) au lieu d'un scan
-    /// linéaire de 12 bitboards. piece_at() est sur le chemin le plus chaud du
-    /// moteur (make_move, SEE, ordonnancement des coups, détection de captures)
-    /// — d'où un gain de NPS, sans aucun changement de résultat (zéro Elo perdu).
+    /// Goal: make piece_at() O(1) (a single indexed read) instead of a
+    /// linear scan of 12 bitboards. piece_at() is on the hottest path of the
+    /// engine (make_move, SEE, move ordering, capture detection)
+    /// — hence a gain in NPS, with no change in result (zero Elo lost).
     pub piece_on: [Option<(Piece, Color)>; 64],
 
-    /// Historique des états irréversibles (une entrée par coup joué).
+    /// History of irreversible states (one entry per move played).
     pub history: Vec<BoardState>,
 }
 
 impl Board {
-    /// Crée un plateau vide (aucune pièce).
+    /// Creates an empty board (no pieces).
     pub fn empty() -> Board {
         init_attack_tables();
         Board {
@@ -215,23 +215,23 @@ impl Board {
         }
     }
 
-    /// Crée un plateau avec la position initiale des échecs.
+    /// Creates a board with the initial chess position.
     pub fn start_position() -> Board {
         Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
             .expect("La position initiale FEN est valide")
     }
 
     // =========================================================================
-    // Accès aux bitboards
+    // Access to the bitboards
     // =========================================================================
 
-    /// Retourne la pièce présente sur la case `sq`, ou None si vide.
+    /// Returns the piece present on square `sq`, or None if empty.
     ///
-    /// O(1) : simple lecture du mailbox `piece_on` (maintenu incrémentalement
-    /// dans place_piece()/remove_piece()). En build de développement, un
-    /// debug_assert revérifie la cohérence du mailbox avec un scan des bitboards
-    /// — toute désynchronisation est détectée immédiatement (notamment par perft
-    /// et `cargo test`), sans aucun coût en release.
+    /// O(1): a simple read of the `piece_on` mailbox (maintained incrementally
+    /// in place_piece()/remove_piece()). In development builds, a
+    /// debug_assert re-checks the mailbox's consistency with a scan of the bitboards
+    /// — any desynchronization is detected immediately (in particular by perft
+    /// and `cargo test`), with no cost in release.
     #[inline]
     pub fn piece_at(&self, sq: u8) -> Option<(Piece, Color)> {
         debug_assert_eq!(
@@ -242,10 +242,10 @@ impl Board {
         self.piece_on[sq as usize]
     }
 
-    /// Scan linéaire des bitboards (ancienne implémentation de piece_at).
-    /// Conservé UNIQUEMENT comme référence de cohérence pour le debug_assert de
-    /// piece_at — jamais appelé en release (#[allow(dead_code)] car la référence
-    /// vit dans un bloc `debug_assert!`, compilé hors en release).
+    /// Linear scan of the bitboards (former implementation of piece_at).
+    /// Kept ONLY as a consistency reference for the debug_assert of
+    /// piece_at — never called in release (#[allow(dead_code)] because the reference
+    /// lives inside a `debug_assert!` block, compiled out in release).
     #[allow(dead_code)]
     fn piece_at_scan(&self, sq: u8) -> Option<(Piece, Color)> {
         for color in [Color::White, Color::Black] {
@@ -259,8 +259,8 @@ impl Board {
         None
     }
 
-    /// Retourne la case du roi de la couleur donnée.
-    /// Précondition : le roi est présent sur le plateau (garanti par from_fen).
+    /// Returns the square of the king of the given color.
+    /// Precondition: the king is present on the board (guaranteed by from_fen).
     pub fn king_square(&self, color: Color) -> u8 {
         let bb = self.pieces[color.index()][Piece::King.index()];
         debug_assert_ne!(bb, 0, "king_square : aucun roi {:?} sur le plateau — position invalide", color);
@@ -268,55 +268,55 @@ impl Board {
     }
 
     // =========================================================================
-    // Placement et retrait de pièces
+    // Placing and removing pieces
     // =========================================================================
 
-    /// Place une pièce sur la case `sq` et met à jour les bitboards, le hash
-    /// et les scores incrémentaux eval_mg / eval_eg.
+    /// Places a piece on square `sq` and updates the bitboards, the hash
+    /// and the incremental eval_mg / eval_eg scores.
     ///
-    /// eval_mg / eval_eg sont en perspective Blanc (Blanc − Noir) :
-    ///   - Blanc : +mat +PST
-    ///   - Noir  : −mat −PST
+    /// eval_mg / eval_eg are in White's perspective (White − Black):
+    ///   - White: +mat +PST
+    ///   - Black: −mat −PST
     ///
-    /// Le roi compte pour la PST mais pas pour le matériel (incr_value = 0).
+    /// The king counts for the PST but not for the material (incr_value = 0).
     pub fn place_piece(&mut self, color: Color, piece: Piece, sq: u8) {
         set_bit(&mut self.pieces[color.index()][piece.index()], sq);
         set_bit(&mut self.occupancy[color.index()], sq);
         set_bit(&mut self.all_pieces, sq);
-        // Mailbox : la pièce est désormais présente sur `sq` (lecture O(1) par piece_at).
+        // Mailbox: the piece is now present on `sq` (O(1) read via piece_at).
         self.piece_on[sq as usize] = Some((piece, color));
         self.hash ^= ZOBRIST.piece(color, piece, sq);
 
-        // Mise à jour incrémentale du score (matériel + PST).
+        // Incremental score update (material + PST).
         let (pst_mg, pst_eg) = piece_square_values(piece, color, sq);
         let sign = if color == Color::White { 1i32 } else { -1i32 };
         self.eval_mg += sign * (piece.incr_value() + pst_mg);
         self.eval_eg += sign * (piece.incr_value() + pst_eg);
 
-        // Compteur de pièces (pour is_insufficient_material O(1)).
+        // Piece counter (for is_insufficient_material O(1)).
         self.piece_count[color.index()][piece.index()] += 1;
     }
 
-    /// Retire une pièce de la case `sq` et met à jour les bitboards, le hash
-    /// et les scores incrémentaux eval_mg / eval_eg.
+    /// Removes a piece from square `sq` and updates the bitboards, the hash
+    /// and the incremental eval_mg / eval_eg scores.
     pub fn remove_piece(&mut self, color: Color, piece: Piece, sq: u8) {
         clear_bit(&mut self.pieces[color.index()][piece.index()], sq);
         clear_bit(&mut self.occupancy[color.index()], sq);
         clear_bit(&mut self.all_pieces, sq);
-        // Mailbox : la case `sq` est désormais vide.
+        // Mailbox: square `sq` is now empty.
         self.piece_on[sq as usize] = None;
         self.hash ^= ZOBRIST.piece(color, piece, sq);
 
-        // Annulation de la contribution incrémentale.
+        // Cancellation of the incremental contribution.
         let (pst_mg, pst_eg) = piece_square_values(piece, color, sq);
         let sign = if color == Color::White { 1i32 } else { -1i32 };
         self.eval_mg -= sign * (piece.incr_value() + pst_mg);
         self.eval_eg -= sign * (piece.incr_value() + pst_eg);
 
-        // Compteur de pièces (pour is_insufficient_material O(1)).
-        // Invariant : le compteur doit être > 0 avant de décrémenter.
-        // En mode release, le u8 wrappe silencieusement → debug_assert! pour détecter
-        // toute corruption dès le développement, sans coût en production.
+        // Piece counter (for is_insufficient_material O(1)).
+        // Invariant: the counter must be > 0 before decrementing.
+        // In release mode, the u8 wraps silently → debug_assert! to detect
+        // any corruption during development, at no cost in production.
         debug_assert!(
             self.piece_count[color.index()][piece.index()] > 0,
             "remove_piece : piece_count[{:?}][{:?}] est déjà 0 — double suppression ?",
@@ -325,18 +325,18 @@ impl Board {
         self.piece_count[color.index()][piece.index()] -= 1;
     }
 
-    /// Déplace une pièce de `from` vers `to` sans mise à jour du hash (usage interne).
+    /// Moves a piece from `from` to `to` without updating the hash (internal use).
     fn move_piece_internal(&mut self, color: Color, piece: Piece, from: u8, to: u8) {
         self.remove_piece(color, piece, from);
         self.place_piece(color, piece, to);
     }
 
     // =========================================================================
-    // Lecture FEN
+    // FEN reading
     // =========================================================================
 
-    /// Crée un plateau depuis une chaîne FEN.
-    /// Retourne Err(message) si la FEN est invalide.
+    /// Creates a board from a FEN string.
+    /// Returns Err(message) if the FEN is invalid.
     pub fn from_fen(fen: &str) -> Result<Board, String> {
         let mut board = Board::empty();
         let parts: Vec<&str> = fen.split_whitespace().collect();
@@ -345,7 +345,7 @@ impl Board {
             return Err(format!("FEN invalide : pas assez de champs (reçu {})", parts.len()));
         }
 
-        // --- Champ 1 : placement des pièces ---
+        // --- Field 1: piece placement ---
         let mut rank: i32 = 7;
         let mut file: i32 = 0;
 
@@ -376,9 +376,9 @@ impl Board {
             }
         }
 
-        // --- Validation : exactement un roi par camp ---
-        // Nécessaire pour garantir que king_square() retourne toujours une case valide (0-63).
-        // Sans cette vérification, un FEN malformé provoquerait un crash en pleine partie.
+        // --- Validation: exactly one king per side ---
+        // Necessary to guarantee that king_square() always returns a valid square (0-63).
+        // Without this check, a malformed FEN would cause a crash in the middle of a game.
         let white_kings = board.pieces[Color::White.index()][Piece::King.index()].count_ones();
         let black_kings = board.pieces[Color::Black.index()][Piece::King.index()].count_ones();
         if white_kings != 1 {
@@ -394,7 +394,7 @@ impl Board {
             ));
         }
 
-        // --- Champ 2 : trait ---
+        // --- Field 2: side to move ---
         board.side_to_move = match parts[1] {
             "w" => Color::White,
             "b" => Color::Black,
@@ -404,7 +404,7 @@ impl Board {
             board.hash ^= ZOBRIST.side;
         }
 
-        // --- Champ 3 : droits de roque ---
+        // --- Field 3: castling rights ---
         board.castling = CastlingRights::NONE;
         if parts[2] != "-" {
             for c in parts[2].chars() {
@@ -419,38 +419,38 @@ impl Board {
             }
         }
 
-        // --- Validation des droits de roque ---
+        // --- Validation of castling rights ---
         //
-        // Pour chaque droit actif, on vérifie que le roi ET la tour requise sont bien
-        // présents sur leurs cases initiales standard (échecs classiques) :
+        // For each active right, we check that the king AND the required rook are
+        // indeed present on their standard starting squares (classical chess):
         //
-        //   K → Roi blanc en e1 (sq 4)  + Tour blanche en h1 (sq 7)
-        //   Q → Roi blanc en e1 (sq 4)  + Tour blanche en a1 (sq 0)
-        //   k → Roi noir  en e8 (sq 60) + Tour noire  en h8 (sq 63)
-        //   q → Roi noir  en e8 (sq 60) + Tour noire  en a8 (sq 56)
+        //   K → White king on e1 (sq 4)  + White rook on h1 (sq 7)
+        //   Q → White king on e1 (sq 4)  + White rook on a1 (sq 0)
+        //   k → Black king on e8 (sq 60) + Black rook on h8 (sq 63)
+        //   q → Black king on e8 (sq 60) + Black rook on a8 (sq 56)
         //
-        // Stratégie : retrait silencieux du droit invalide plutôt que Err().
+        // Strategy: silently remove the invalid right rather than Err().
         //
-        //   Raison : de nombreuses GUIs (Arena, Cutechess…) envoient des FEN avec
-        //   des droits de roque résiduels (ex : "KQkq" alors que la tour a1 a bougé
-        //   puis est revenue). Retourner Err() bloquerait le moteur sur un coup légal.
-        //   On retire le droit invalide et le moteur continue proprement.
+        //   Reason: many GUIs (Arena, Cutechess…) send FENs with
+        //   residual castling rights (e.g. "KQkq" even though the a1 rook has moved
+        //   and then come back). Returning Err() would block the engine on a legal move.
+        //   We remove the invalid right and the engine continues cleanly.
         //
-        //   En build de développement (`debug_assert!`) l'incohérence est signalée
-        //   immédiatement sans aucun coût en release.
+        //   In a development build (`debug_assert!`) the inconsistency is flagged
+        //   immediately with no cost at all in release.
         //
-        // IMPORTANT : le hash Zobrist est calculé APRÈS cette correction pour refléter
-        // les droits réels (pas ceux du FEN brut). Un hash calculé sur des droits
-        // incorrects produirait de faux hits en table de transposition.
+        // IMPORTANT: the Zobrist hash is computed AFTER this correction to reflect
+        // the real rights (not the raw FEN ones). A hash computed on
+        // incorrect rights would produce false hits in the transposition table.
         {
             let w_rooks = board.pieces[Color::White.index()][Piece::Rook.index()];
             let b_rooks = board.pieces[Color::Black.index()][Piece::Rook.index()];
             let w_kings = board.pieces[Color::White.index()][Piece::King.index()];
             let b_kings = board.pieces[Color::Black.index()][Piece::King.index()];
 
-            // Roi blanc sur e1 (sq 4) ?
+            // White king on e1 (sq 4)?
             let white_king_on_e1 = get_bit(w_kings, 4);
-            // Roi noir sur e8 (sq 60) ?
+            // Black king on e8 (sq 60)?
             let black_king_on_e8 = get_bit(b_kings, 60);
 
             if board.castling.0 & CastlingRights::WHITE_KINGSIDE != 0 {
@@ -502,21 +502,21 @@ impl Board {
             }
         }
 
-        // Hash calculé sur les droits corrigés (pas les droits bruts du FEN).
+        // Hash computed on the corrected rights (not the raw FEN rights).
         board.hash ^= ZOBRIST.castling(board.castling);
 
-        // --- Champ 4 : prise en passant ---
+        // --- Field 4: en passant ---
         board.en_passant = if parts[3] == "-" {
             None
         } else {
             let sq = square_from_str(parts[3])
                 .ok_or_else(|| format!("FEN invalide : case en passant '{}'", parts[3]))?;
 
-            // Validation du rang : la case en passant doit être sur le rang 3 (index 2,
-            // noir vient de pousser deux cases, case cible pour les blancs) ou le rang 6
-            // (index 5, blanc vient de pousser, case cible pour les noirs).
-            // Un rang incorrect produirait une corruption silencieuse lors de la prise en passant
-            // (to - 8 ou to + 8 pointerait hors de la zone attendue).
+            // Rank validation: the en passant square must be on rank 3 (index 2,
+            // black just pushed two squares, target square for white) or rank 6
+            // (index 5, white just pushed, target square for black).
+            // An incorrect rank would produce silent corruption during the en passant capture
+            // (to - 8 or to + 8 would point outside the expected zone).
             let ep_rank = rank_of(sq);
             if ep_rank != 2 && ep_rank != 5 {
                 return Err(format!(
@@ -530,13 +530,13 @@ impl Board {
             Some(sq)
         };
 
-        // --- Champ 5 : compteur 50 coups (optionnel) ---
+        // --- Field 5: 50-move counter (optional) ---
         if parts.len() > 4 {
             board.halfmove_clock = parts[4].parse::<u32>()
                 .map_err(|_| format!("FEN invalide : compteur 50 coups '{}'", parts[4]))?;
         }
 
-        // --- Champ 6 : numéro du coup complet (optionnel) ---
+        // --- Field 6: full move number (optional) ---
         if parts.len() > 5 {
             board.fullmove_number = parts[5].parse::<u32>()
                 .map_err(|_| format!("FEN invalide : numéro de coup '{}'", parts[5]))?;
@@ -545,18 +545,18 @@ impl Board {
         Ok(board)
     }
 
-    /// Génère la chaîne FEN de la position actuelle.
+    /// Generates the FEN string of the current position.
     pub fn to_fen(&self) -> String {
         let mut fen = String::new();
 
-        // Placement des pièces.
-        // Invariant : `empty` est compté case par case sur 8 colonnes → max 8.
-        // `char::from_digit(n, 10)` retourne None uniquement si n >= 10.
-        // Puisque empty ∈ [1, 8], la conversion est toujours valide.
-        // On utilise `(b'0' + empty as u8) as char` pour documenter l'invariant
-        // explicitement et éviter tout unwrap superflu.
+        // Piece placement.
+        // Invariant: `empty` is counted square by square over 8 columns → max 8.
+        // `char::from_digit(n, 10)` returns None only if n >= 10.
+        // Since empty ∈ [1, 8], the conversion is always valid.
+        // We use `(b'0' + empty as u8) as char` to document the invariant
+        // explicitly and avoid any superfluous unwrap.
         for rank in (0..8).rev() {
-            let mut empty = 0u8; // u8 suffit : max 8 cases vides par rang
+            let mut empty = 0u8; // u8 is enough: max 8 empty squares per rank
             for file in 0..8u8 {
                 let sq = make_square(file, rank);
                 if let Some((piece, color)) = self.piece_at(sq) {
@@ -577,11 +577,11 @@ impl Board {
             if rank > 0 { fen.push('/'); }
         }
 
-        // Trait
+        // Side to move
         fen.push(' ');
         fen.push(if self.side_to_move == Color::White { 'w' } else { 'b' });
 
-        // Droits de roque
+        // Castling rights
         fen.push(' ');
         if self.castling.0 == 0 {
             fen.push('-');
@@ -602,29 +602,29 @@ impl Board {
             }
         }
 
-        // Compteurs
+        // Counters
         fen.push_str(&format!(" {} {}", self.halfmove_clock, self.fullmove_number));
 
         fen
     }
 
     // =========================================================================
-    // Jouer et annuler un coup
+    // Play and undo a move
     // =========================================================================
 
-    /// Joue le coup `mv` sur le plateau.
-    /// L'état irréversible est sauvegardé dans `self.history` pour pouvoir
-    /// annuler le coup avec unmake_move.
+    /// Plays the move `mv` on the board.
+    /// The irreversible state is saved in `self.history` so the move can
+    /// be undone with unmake_move.
     pub fn make_move(&mut self, mv: Move) {
         let color   = self.side_to_move;
         let enemy   = color.opposite();
         let from    = mv.from;
         let to      = mv.to;
 
-        // Récupérer la pièce qui bouge.
-        // Invariant : from doit toujours contenir une pièce (garantie par le générateur légal).
-        // En debug on panique immédiatement pour détecter toute corruption ; en release on
-        // retourne proprement plutôt que de corrompre l'état du plateau.
+        // Retrieve the piece that is moving.
+        // Invariant: from must always contain a piece (guaranteed by the legal generator).
+        // In debug we panic immediately to detect any corruption; in release we
+        // return cleanly rather than corrupting the board state.
         let piece = match self.piece_at(from) {
             Some((p, _)) => p,
             None => {
@@ -633,14 +633,14 @@ impl Board {
             }
         };
 
-        // Récupérer la pièce capturée (si capture normale)
+        // Retrieve the captured piece (if normal capture)
         let captured = if mv.flags.is_capture() && mv.flags != MoveFlags::EnPassant {
             self.piece_at(to).map(|(p, _)| p)
         } else {
             None
         };
 
-        // Sauvegarder l'état irréversible
+        // Save the irreversible state
         self.history.push(BoardState {
             castling:        self.castling,
             en_passant:      self.en_passant,
@@ -649,21 +649,21 @@ impl Board {
             hash:            self.hash,
         });
 
-        // Mise à jour du hash : retirer l'ancien en passant et roque
+        // Hash update: remove the old en passant and castling
         if let Some(ep_sq) = self.en_passant {
             self.hash ^= ZOBRIST.en_passant(file_of(ep_sq));
         }
         self.hash ^= ZOBRIST.castling(self.castling);
 
-        // Réinitialiser la case en passant
+        // Reset the en passant square
         self.en_passant = None;
 
-        // Mise à jour des droits de roque
+        // Update castling rights
         self.castling.remove_rights_for_square(from);
         self.castling.remove_rights_for_square(to);
         self.hash ^= ZOBRIST.castling(self.castling);
 
-        // Mise à jour du compteur des 50 coups
+        // Update the 50-move counter
         if piece == Piece::Pawn || mv.flags.is_capture() {
             self.halfmove_clock = 0;
         } else {
@@ -672,23 +672,23 @@ impl Board {
 
         match mv.flags {
             MoveFlags::Quiet => {
-                // Déplacement simple
+                // Simple move
                 self.move_piece_internal(color, piece, from, to);
-                // Poussée de deux cases : mettre à jour la case en passant
-                // (géré par DoublePush ci-dessous)
+                // Two-square push: update the en passant square
+                // (handled by DoublePush below)
             }
 
             MoveFlags::DoublePush => {
-                // Poussée de deux cases du pion
+                // Pawn two-square push
                 self.move_piece_internal(color, Piece::Pawn, from, to);
-                // La case en passant est entre from et to
+                // The en passant square is between from and to
                 let ep_sq = if color == Color::White { from + 8 } else { from - 8 };
                 self.en_passant = Some(ep_sq);
                 self.hash ^= ZOBRIST.en_passant(file_of(ep_sq));
             }
 
             MoveFlags::Capture => {
-                // Retirer la pièce capturée
+                // Remove the captured piece
                 if let Some(cap) = captured {
                     self.remove_piece(enemy, cap, to);
                 }
@@ -696,14 +696,14 @@ impl Board {
             }
 
             MoveFlags::EnPassant => {
-                // La pièce capturée est sur la case adjacente, pas sur `to`
+                // The captured piece is on the adjacent square, not on `to`
                 let cap_sq = if color == Color::White { to - 8 } else { to + 8 };
                 self.remove_piece(enemy, Piece::Pawn, cap_sq);
                 self.move_piece_internal(color, Piece::Pawn, from, to);
             }
 
             MoveFlags::CastleKingside => {
-                // Déplacer le roi et la tour (côté roi)
+                // Move the king and the rook (king side)
                 self.move_piece_internal(color, Piece::King, from, to);
                 let (rook_from, rook_to) = if color == Color::White {
                     (7u8, 5u8)   // h1 → f1
@@ -714,7 +714,7 @@ impl Board {
             }
 
             MoveFlags::CastleQueenside => {
-                // Déplacer le roi et la tour (côté dame)
+                // Move the king and the rook (queen side)
                 self.move_piece_internal(color, Piece::King, from, to);
                 let (rook_from, rook_to) = if color == Color::White {
                     (0u8, 3u8)   // a1 → d1
@@ -725,14 +725,14 @@ impl Board {
             }
 
             MoveFlags::Promotion => {
-                // Retirer le pion et placer la pièce de promotion
+                // Remove the pawn and place the promotion piece
                 self.remove_piece(color, Piece::Pawn, from);
                 let promo = mv.promotion_piece().unwrap_or(Piece::Queen);
                 self.place_piece(color, promo, to);
             }
 
             MoveFlags::PromotionCapture => {
-                // Retirer la pièce capturée, retirer le pion, placer la promotion
+                // Remove the captured piece, remove the pawn, place the promotion
                 if let Some(cap) = captured {
                     self.remove_piece(enemy, cap, to);
                 }
@@ -742,33 +742,33 @@ impl Board {
             }
         }
 
-        // Changer le joueur actif
+        // Switch the side to move
         self.side_to_move = enemy;
         self.hash ^= ZOBRIST.side;
 
-        // Incrémenter le numéro du coup complet après les Noirs
+        // Increment the full move number after Black
         if color == Color::Black {
             self.fullmove_number += 1;
         }
     }
 
-    /// Annule le dernier coup joué et restaure l'état précédent.
-    /// Précondition : make_move a été appelé au moins une fois.
+    /// Undoes the last move played and restores the previous state.
+    /// Precondition: make_move has been called at least once.
     pub fn unmake_move(&mut self, mv: Move) {
-        // Restaurer le joueur actif (on revient au joueur qui venait de jouer)
+        // Restore the side to move (back to the player who had just moved)
         self.side_to_move = self.side_to_move.opposite();
         let color = self.side_to_move;
         let enemy = color.opposite();
         let from  = mv.from;
         let to    = mv.to;
 
-        // Décrémenter le numéro du coup si c'était les Noirs qui avaient joué
+        // Decrement the move number if it was Black who had played
         if color == Color::Black {
             self.fullmove_number -= 1;
         }
 
-        // Restaurer l'état irréversible.
-        // Invariant : history ne doit jamais être vide ici (make/unmake toujours symétriques).
+        // Restore the irreversible state.
+        // Invariant: history must never be empty here (make/unmake are always symmetric).
         let state = match self.history.pop() {
             Some(s) => s,
             None    => {
@@ -781,10 +781,10 @@ impl Board {
         self.halfmove_clock = state.halfmove_clock;
         self.hash           = state.hash;
 
-        // Récupérer la pièce qui était sur `to`.
-        // Pour les promotions, on sait que c'était un pion (la pièce promue a été
-        // retirée par remove_piece dans make_move, mais le bitboard Pion n'a pas encore
-        // été restauré — on utilise directement Piece::Pawn).
+        // Retrieve the piece that was on `to`.
+        // For promotions, we know it was a pawn (the promoted piece was
+        // removed by remove_piece in make_move, but the Pawn bitboard has not yet
+        // been restored — we use Piece::Pawn directly).
         let piece = match mv.flags {
             MoveFlags::Promotion | MoveFlags::PromotionCapture => Piece::Pawn,
             _ => match self.piece_at(to).map(|(p, _)| p) {
@@ -799,12 +799,12 @@ impl Board {
 
         match mv.flags {
             MoveFlags::Quiet | MoveFlags::DoublePush => {
-                // Déplacement simple : remettre la pièce à sa place
+                // Simple move: put the piece back in place
                 self.move_piece_internal(color, piece, to, from);
             }
 
             MoveFlags::Capture => {
-                // Remettre la pièce à sa place et restaurer la pièce capturée
+                // Put the piece back in place and restore the captured piece
                 self.move_piece_internal(color, piece, to, from);
                 if let Some(cap) = state.captured_piece {
                     self.place_piece(enemy, cap, to);
@@ -812,14 +812,14 @@ impl Board {
             }
 
             MoveFlags::EnPassant => {
-                // Remettre le pion à sa place et restaurer le pion capturé en passant
+                // Put the pawn back in place and restore the pawn captured en passant
                 self.move_piece_internal(color, Piece::Pawn, to, from);
                 let cap_sq = if color == Color::White { to - 8 } else { to + 8 };
                 self.place_piece(enemy, Piece::Pawn, cap_sq);
             }
 
             MoveFlags::CastleKingside => {
-                // Remettre le roi et la tour à leur place
+                // Put the king and the rook back in place
                 self.move_piece_internal(color, Piece::King, to, from);
                 let (rook_from, rook_to) = if color == Color::White {
                     (7u8, 5u8)
@@ -830,7 +830,7 @@ impl Board {
             }
 
             MoveFlags::CastleQueenside => {
-                // Remettre le roi et la tour à leur place
+                // Put the king and the rook back in place
                 self.move_piece_internal(color, Piece::King, to, from);
                 let (rook_from, rook_to) = if color == Color::White {
                     (0u8, 3u8)
@@ -841,14 +841,14 @@ impl Board {
             }
 
             MoveFlags::Promotion => {
-                // Retirer la pièce de promotion et remettre le pion
+                // Remove the promotion piece and put the pawn back
                 let promo = mv.promotion_piece().unwrap_or(Piece::Queen);
                 self.remove_piece(color, promo, to);
                 self.place_piece(color, Piece::Pawn, from);
             }
 
             MoveFlags::PromotionCapture => {
-                // Retirer la pièce de promotion, remettre le pion et la pièce capturée
+                // Remove the promotion piece, put the pawn back and the captured piece
                 let promo = mv.promotion_piece().unwrap_or(Piece::Queen);
                 self.remove_piece(color, promo, to);
                 self.place_piece(color, Piece::Pawn, from);
@@ -859,19 +859,19 @@ impl Board {
         }
     }
 
-    /// Joue un coup "nul" (le joueur passe son tour).
-    /// Utilisé dans la recherche pour le null move pruning.
-    /// Retourne la case en passant précédente pour pouvoir annuler.
+    /// Plays a "null" move (the player passes their turn).
+    /// Used in search for null move pruning.
+    /// Returns the previous en passant square so it can be undone.
     pub fn make_null_move(&mut self) -> Option<u8> {
         let prev_ep = self.en_passant;
 
-        // Retirer l'en passant du hash
+        // Remove the en passant from the hash
         if let Some(ep_sq) = self.en_passant {
             self.hash ^= ZOBRIST.en_passant(file_of(ep_sq));
         }
         self.en_passant = None;
 
-        // Changer le trait
+        // Switch the side to move
         self.side_to_move = self.side_to_move.opposite();
         self.hash ^= ZOBRIST.side;
         self.halfmove_clock += 1;
@@ -879,13 +879,13 @@ impl Board {
         prev_ep
     }
 
-    /// Annule un coup nul.
+    /// Undoes a null move.
     pub fn unmake_null_move(&mut self, prev_ep: Option<u8>) {
         self.side_to_move = self.side_to_move.opposite();
         self.hash ^= ZOBRIST.side;
         self.halfmove_clock -= 1;
 
-        // Restaurer l'en passant
+        // Restore the en passant
         if let Some(ep_sq) = prev_ep {
             self.hash ^= ZOBRIST.en_passant(file_of(ep_sq));
         }
@@ -894,62 +894,62 @@ impl Board {
 }
 
 // =============================================================================
-// Hachage Zobrist
+// Zobrist hashing
 //
-// Le hachage Zobrist permet d'identifier une position de façon (quasi) unique
-// avec un entier u64. Il est mis à jour incrémentalement à chaque coup joué,
-// ce qui est très efficace. Utilisé par la table de transposition.
+// Zobrist hashing makes it possible to identify a position in a (quasi) unique way
+// with a u64 integer. It is updated incrementally on each move played,
+// which is very efficient. Used by the transposition table.
 // =============================================================================
 
-/// Table des nombres aléatoires Zobrist, initialisée statiquement.
+/// Table of Zobrist random numbers, statically initialized.
 pub struct ZobristTable {
-    /// Nombre aléatoire pour chaque combinaison (couleur, pièce, case).
+    /// Random number for each combination (color, piece, square).
     pub pieces:     [[[u64; 64]; 6]; 2],
-    /// Nombre aléatoire pour le trait (Noir joue).
+    /// Random number for the side to move (Black to move).
     pub side:       u64,
-    /// Nombres aléatoires pour les droits de roque (16 combinaisons possibles).
+    /// Random numbers for castling rights (16 possible combinations).
     pub castling:   [u64; 16],
-    /// Nombres aléatoires pour la colonne de la case en passant (8 colonnes).
+    /// Random numbers for the en passant square's column (8 columns).
     pub en_passant: [u64; 8],
 }
 
 impl ZobristTable {
-    /// Retourne le hash pour une pièce sur une case.
+    /// Returns the hash for a piece on a square.
     #[inline]
     pub fn piece(&self, color: Color, piece: Piece, sq: u8) -> u64 {
         self.pieces[color.index()][piece.index()][sq as usize]
     }
 
-    /// Retourne le hash pour les droits de roque.
+    /// Returns the hash for castling rights.
     #[inline]
     pub fn castling(&self, rights: CastlingRights) -> u64 {
         self.castling[(rights.0 & 0xF) as usize]
     }
 
-    /// Retourne le hash pour la colonne de la case en passant.
+    /// Returns the hash for the en passant square's column.
     #[inline]
     pub fn en_passant(&self, file: u8) -> u64 {
         self.en_passant[file as usize]
     }
 }
 
-/// Génère un nombre pseudo-aléatoire u64 depuis une graine (xorshift64).
-/// Utilisé uniquement pour initialiser la table Zobrist.
+/// Generates a u64 pseudo-random number from a seed (xorshift64).
+/// Used only to initialize the Zobrist table.
 const fn xorshift64(seed: u64) -> u64 {
     let x = seed ^ (seed << 13);
     let x = x ^ (x >> 7);
     x ^ (x << 17)
 }
 
-/// Table Zobrist initialisée à la compilation avec des constantes déterministes.
-/// On utilise un générateur xorshift pour produire des valeurs bien distribuées.
+/// Zobrist table initialized at compile time with deterministic constants.
+/// We use a xorshift generator to produce well-distributed values.
 pub static ZOBRIST: ZobristTable = {
     let mut pieces     = [[[0u64; 64]; 6]; 2];
     let mut castling   = [0u64; 16];
     let mut en_passant = [0u64; 8];
     let mut seed: u64  = 0x123456789ABCDEF0;
 
-    // Remplir les nombres pour les pièces
+    // Fill in the numbers for the pieces
     let mut c = 0usize;
     while c < 2 {
         let mut p = 0usize;
@@ -965,11 +965,11 @@ pub static ZOBRIST: ZobristTable = {
         c += 1;
     }
 
-    // Remplir les nombres pour le trait
+    // Fill in the numbers for the side to move
     seed = xorshift64(seed);
     let side = seed;
 
-    // Remplir les nombres pour le roque
+    // Fill in the numbers for castling
     let mut i = 0usize;
     while i < 16 {
         seed = xorshift64(seed);
@@ -977,7 +977,7 @@ pub static ZOBRIST: ZobristTable = {
         i += 1;
     }
 
-    // Remplir les nombres pour l'en passant
+    // Fill in the numbers for en passant
     let mut i = 0usize;
     while i < 8 {
         seed = xorshift64(seed);
@@ -995,15 +995,15 @@ mod tests {
     #[test]
     fn test_position_initiale_fen() {
         let board = Board::start_position();
-        // Les Blancs jouent en premier
+        // White plays first
         assert_eq!(board.side_to_move, Color::White);
-        // 8 pions blancs
+        // 8 white pawns
         assert_eq!(board.pieces[Color::White.index()][Piece::Pawn.index()].count_ones(), 8);
-        // 8 pions noirs
+        // 8 black pawns
         assert_eq!(board.pieces[Color::Black.index()][Piece::Pawn.index()].count_ones(), 8);
-        // Tous les droits de roque
+        // All castling rights
         assert_eq!(board.castling.0, CastlingRights::ALL.0);
-        // Pas d'en passant
+        // No en passant
         assert!(board.en_passant.is_none());
     }
 

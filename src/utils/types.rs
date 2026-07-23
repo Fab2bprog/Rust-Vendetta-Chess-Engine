@@ -1,26 +1,26 @@
 // =============================================================================
 // Vendetta Chess Motor — src/utils/types.rs
 //
-// Rôle : Définit tous les types fondamentaux partagés par l'ensemble du projet.
-//        Ce fichier est la base de tout — Color, Piece, Square, Move et les
-//        constantes de score. Aucun autre module n'est importé ici.
+// Role: Defines all the fundamental types shared across the entire project.
+//        This file is the foundation of everything — Color, Piece, Square, Move and the
+//        score constants. No other module is imported here.
 //
-// Contenu :
-//   - Color : couleur d'une pièce ou d'un joueur (Blanc / Noir)
-//   - Piece : type de pièce (Pion, Cavalier, Fou, Tour, Dame, Roi)
-//   - MoveFlags : type de coup (normal, capture, roque, promotion, etc.)
-//   - Move : représentation d'un coup
-//   - Constantes : valeurs de score, indices de pièces
+// Contents:
+//   - Color: color of a piece or a player (White / Black)
+//   - Piece: piece type (Pawn, Knight, Bishop, Rook, Queen, King)
+//   - MoveFlags: move type (normal, capture, castling, promotion, etc.)
+//   - Move: representation of a move
+//   - Constants: score values, piece indices
 //
-// Convention des cases (Square) :
-//   - u8, valeur 0 à 63
-//   - sq = rang * 8 + colonne
-//   - Colonne : 0=a, 1=b, ..., 7=h
-//   - Rang    : 0=rang1, 1=rang2, ..., 7=rang8
-//   - Exemple : e4 → colonne 4, rang 3 → sq = 3*8+4 = 28
+// Square convention:
+//   - u8, value 0 to 63
+//   - sq = rank * 8 + file
+//   - File: 0=a, 1=b, ..., 7=h
+//   - Rank    : 0=rank1, 1=rank2, ..., 7=rank8
+//   - Example: e4 → file 4, rank 3 → sq = 3*8+4 = 28
 // =============================================================================
 
-/// Couleur d'un joueur ou d'une pièce.
+/// Color of a player or a piece.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color {
     White = 0,
@@ -28,7 +28,7 @@ pub enum Color {
 }
 
 impl Color {
-    /// Retourne la couleur opposée.
+    /// Returns the opposite color.
     #[inline]
     pub fn opposite(self) -> Color {
         match self {
@@ -37,14 +37,14 @@ impl Color {
         }
     }
 
-    /// Retourne l'index numérique (0 pour Blanc, 1 pour Noir).
+    /// Returns the numeric index (0 for White, 1 for Black).
     #[inline]
     pub fn index(self) -> usize {
         self as usize
     }
 }
 
-/// Type de pièce aux échecs.
+/// Chess piece type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Piece {
     Pawn   = 0,
@@ -56,14 +56,14 @@ pub enum Piece {
 }
 
 impl Piece {
-    /// Retourne l'index numérique de la pièce (0 à 5).
+    /// Returns the numeric index of the piece (0 to 5).
     #[inline]
     pub fn index(self) -> usize {
         self as usize
     }
 
-    /// Crée une pièce depuis son index numérique.
-    /// Retourne None si l'index est invalide.
+    /// Creates a piece from its numeric index.
+    /// Returns None if the index is invalid.
     pub fn from_index(i: usize) -> Option<Piece> {
         match i {
             0 => Some(Piece::Pawn),
@@ -76,7 +76,7 @@ impl Piece {
         }
     }
 
-    /// Retourne le caractère FEN de la pièce (majuscule = Blanc, minuscule = Noir).
+    /// Returns the FEN character of the piece (uppercase = White, lowercase = Black).
     pub fn to_fen_char(self, color: Color) -> char {
         let c = match self {
             Piece::Pawn   => 'p',
@@ -89,7 +89,7 @@ impl Piece {
         if color == Color::White { c.to_ascii_uppercase() } else { c }
     }
 
-    /// Crée une pièce depuis un caractère FEN.
+    /// Creates a piece from a FEN character.
     pub fn from_fen_char(c: char) -> Option<(Piece, Color)> {
         let color = if c.is_uppercase() { Color::White } else { Color::Black };
         let piece = match c.to_ascii_lowercase() {
@@ -104,14 +104,14 @@ impl Piece {
         Some((piece, color))
     }
 
-    /// Valeur matérielle incrémentale de la pièce, utilisée par board::state
-    /// pour maintenir eval_mg / eval_eg en temps réel.
+    /// Incremental material value of the piece, used by board::state
+    /// to maintain eval_mg / eval_eg in real time.
     ///
-    /// Le roi retourne 0 : il n'est PAS comptabilisé dans le matériel
-    /// (cohérent avec material_eval qui l'exclut explicitement), mais il
-    /// contribue tout de même à la PST via piece_square_values().
+    /// The king returns 0: it is NOT counted in the material
+    /// (consistent with material_eval, which explicitly excludes it), but it
+    /// still contributes to the PST via piece_square_values().
     ///
-    /// Les valeurs sont identiques à eval::material::PIECE_VALUE[0..5].
+    /// The values are identical to eval::material::PIECE_VALUE[0..5].
     #[inline]
     pub fn incr_value(self) -> i32 {
         match self {
@@ -120,120 +120,120 @@ impl Piece {
             Piece::Bishop => 330,
             Piece::Rook   => 500,
             Piece::Queen  => 900,
-            Piece::King   =>   0, // Non comptabilisé dans le matériel.
+            Piece::King   =>   0, // Not counted in the material.
         }
     }
 }
 
-/// Indicateurs décrivant le type de coup joué.
+/// Flags describing the type of move played.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MoveFlags {
-    /// Coup silencieux (déplacement simple sans capture).
+    /// Quiet move (simple move without capture).
     Quiet,
-    /// Poussée de deux cases du pion depuis la position initiale.
+    /// Two-square pawn push from the initial position.
     DoublePush,
-    /// Petit roque (côté roi).
+    /// Kingside castling.
     CastleKingside,
-    /// Grand roque (côté dame).
+    /// Queenside castling.
     CastleQueenside,
-    /// Capture simple.
+    /// Simple capture.
     Capture,
-    /// Prise en passant.
+    /// En passant capture.
     EnPassant,
-    /// Promotion sans capture.
+    /// Promotion without capture.
     Promotion,
-    /// Promotion avec capture.
+    /// Promotion with capture.
     PromotionCapture,
 }
 
 impl MoveFlags {
-    /// Retourne true si le coup est une capture (y compris en passant et promotion-capture).
+    /// Returns true if the move is a capture (including en passant and promotion-capture).
     #[inline]
     pub fn is_capture(self) -> bool {
         matches!(self, MoveFlags::Capture | MoveFlags::EnPassant | MoveFlags::PromotionCapture)
     }
 
-    /// Retourne true si le coup est une promotion.
+    /// Returns true if the move is a promotion.
     #[inline]
     pub fn is_promotion(self) -> bool {
         matches!(self, MoveFlags::Promotion | MoveFlags::PromotionCapture)
     }
 
-    /// Retourne true si le coup est un roque.
+    /// Returns true if the move is a castling move.
     #[inline]
     pub fn is_castle(self) -> bool {
         matches!(self, MoveFlags::CastleKingside | MoveFlags::CastleQueenside)
     }
 }
 
-/// Représentation d'un coup aux échecs.
+/// Representation of a chess move.
 ///
-/// Structure compacte (4 octets) copiable efficacement.
-/// La case `promotion` vaut 0 si ce n'est pas une promotion,
-/// sinon l'index de la pièce de promotion (1=Cavalier, 2=Fou, 3=Tour, 4=Dame).
+/// Compact structure (4 bytes) that can be copied efficiently.
+/// The `promotion` field is 0 if it is not a promotion,
+/// otherwise the index of the promotion piece (1=Knight, 2=Bishop, 3=Rook, 4=Queen).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Move {
-    /// Case de départ (0-63).
+    /// Starting square (0-63).
     pub from: u8,
-    /// Case d'arrivée (0-63).
+    /// Destination square (0-63).
     pub to: u8,
-    /// Type du coup.
+    /// Move type.
     pub flags: MoveFlags,
-    /// Pièce de promotion : 0=aucune, 1=Cavalier, 2=Fou, 3=Tour, 4=Dame.
+    /// Promotion piece: 0=none, 1=Knight, 2=Bishop, 3=Rook, 4=Queen.
     pub promotion: u8,
 }
 
 impl Move {
-    /// Crée un coup silencieux (déplacement simple).
+    /// Creates a quiet move (simple move).
     #[inline]
     pub fn quiet(from: u8, to: u8) -> Move {
         Move { from, to, flags: MoveFlags::Quiet, promotion: 0 }
     }
 
-    /// Crée une capture simple.
+    /// Creates a simple capture.
     #[inline]
     pub fn capture(from: u8, to: u8) -> Move {
         Move { from, to, flags: MoveFlags::Capture, promotion: 0 }
     }
 
-    /// Crée une poussée de deux cases.
+    /// Creates a two-square push.
     #[inline]
     pub fn double_push(from: u8, to: u8) -> Move {
         Move { from, to, flags: MoveFlags::DoublePush, promotion: 0 }
     }
 
-    /// Crée une prise en passant.
+    /// Creates an en passant capture.
     #[inline]
     pub fn en_passant(from: u8, to: u8) -> Move {
         Move { from, to, flags: MoveFlags::EnPassant, promotion: 0 }
     }
 
-    /// Crée un petit roque.
+    /// Creates a kingside castling move.
     #[inline]
     pub fn castle_kingside(from: u8, to: u8) -> Move {
         Move { from, to, flags: MoveFlags::CastleKingside, promotion: 0 }
     }
 
-    /// Crée un grand roque.
+    /// Creates a queenside castling move.
     #[inline]
     pub fn castle_queenside(from: u8, to: u8) -> Move {
         Move { from, to, flags: MoveFlags::CastleQueenside, promotion: 0 }
     }
 
-    /// Crée une promotion sans capture.
-    /// `promo` : 1=Cavalier, 2=Fou, 3=Tour, 4=Dame.
+    /// Creates a promotion without capture.
+    /// `promo`: 1=Knight, 2=Bishop, 3=Rook, 4=Queen.
     #[inline]
     pub fn promotion(from: u8, to: u8, promo: u8) -> Move {
         Move { from, to, flags: MoveFlags::Promotion, promotion: promo }
     }
 
-    /// Crée une promotion avec capture.
+    /// Creates a promotion with capture.
     #[inline]
     pub fn promotion_capture(from: u8, to: u8, promo: u8) -> Move {
         Move { from, to, flags: MoveFlags::PromotionCapture, promotion: promo }
     }
 
-    /// Retourne la pièce de promotion, ou None si ce n'est pas une promotion.
+    /// Returns the promotion piece, or None if it is not a promotion.
     pub fn promotion_piece(self) -> Option<Piece> {
         if !self.flags.is_promotion() { return None; }
         match self.promotion {
@@ -245,7 +245,7 @@ impl Move {
         }
     }
 
-    /// Retourne la notation UCI du coup (ex: "e2e4", "e7e8q").
+    /// Returns the UCI notation of the move (e.g., "e2e4", "e7e8q").
     pub fn to_uci(self) -> String {
         let from_col = self.from % 8;
         let from_row = self.from / 8;
@@ -271,21 +271,21 @@ impl Move {
         s
     }
 
-    /// Coup nul (utilisé comme valeur par défaut / sentinelle).
+    /// Null move (used as a default value / sentinel).
     ///
-    /// Représenté par `(from=0, to=0)` — la case a1 vers a1, qui n'est jamais
-    /// un coup légal dans les échecs. Le générateur légal ne produit jamais de coup
-    /// avec `from == to`, donc la collision est impossible en pratique.
+    /// Represented by `(from=0, to=0)` — the square a1 to a1, which is never
+    /// a legal move in chess. The legal move generator never produces a move
+    /// with `from == to`, so the collision is impossible in practice.
     ///
-    /// Remarque : si un jour le moteur devait supporter des variantes où a1→a1
-    /// serait encodable, il faudrait ajouter un champ `is_null: bool` ou utiliser
-    /// une valeur de case hors-plage (ex: 255).
+    /// Note: if the engine were ever to support variants where a1→a1
+    /// were encodable, an `is_null: bool` field would need to be added, or
+    /// an out-of-range square value (e.g., 255) would need to be used.
     pub const NULL: Move = Move { from: 0, to: 0, flags: MoveFlags::Quiet, promotion: 0 };
 
-    /// Retourne true si c'est le coup nul sentinelle.
+    /// Returns true if this is the sentinel null move.
     ///
-    /// Invariant garanti par le générateur légal : aucun coup légal n'a `from == to`.
-    /// Cette détection est donc fiable dans tous les chemins de code normaux.
+    /// Invariant guaranteed by the legal move generator: no legal move has `from == to`.
+    /// This detection is therefore reliable in all normal code paths.
     #[inline]
     pub fn is_null(self) -> bool {
         self.from == 0 && self.to == 0
@@ -293,50 +293,50 @@ impl Move {
 }
 
 // =============================================================================
-// Constantes globales
+// Global constants
 // =============================================================================
 
-/// Score infini (utilisé comme borne dans la recherche alpha-bêta).
+/// Infinite score (used as a bound in alpha-beta search).
 pub const SCORE_INF: i32 = 1_000_000;
 
-/// Score d'un échec et mat. On soustrait la profondeur pour préférer les mats rapides.
+/// Score of a checkmate. The depth is subtracted to prefer faster mates.
 pub const SCORE_MATE: i32 = 900_000;
 
-/// Score nul (position égale).
+/// Draw score (equal position).
 pub const SCORE_DRAW: i32 = 0;
 
-/// Nombre de types de pièces.
+/// Number of piece types.
 pub const NUM_PIECES: usize = 6;
 
-/// Nombre de couleurs.
+/// Number of colors.
 pub const NUM_COLORS: usize = 2;
 
-/// Nombre de cases sur l'échiquier.
+/// Number of squares on the board.
 pub const NUM_SQUARES: usize = 64;
 
 // =============================================================================
-// Fonctions utilitaires sur les cases
+// Utility functions for squares
 // =============================================================================
 
-/// Retourne la colonne d'une case (0=a, 7=h).
+/// Returns the file of a square (0=a, 7=h).
 #[inline]
 pub fn file_of(sq: u8) -> u8 {
     sq % 8
 }
 
-/// Retourne le rang d'une case (0=rang1, 7=rang8).
+/// Returns the rank of a square (0=rank1, 7=rank8).
 #[inline]
 pub fn rank_of(sq: u8) -> u8 {
     sq / 8
 }
 
-/// Crée une case depuis colonne et rang.
+/// Creates a square from file and rank.
 #[inline]
 pub fn make_square(file: u8, rank: u8) -> u8 {
     rank * 8 + file
 }
 
-/// Convertit une notation algébrique (ex: "e4") en numéro de case.
+/// Converts algebraic notation (e.g., "e4") into a square number.
 pub fn square_from_str(s: &str) -> Option<u8> {
     let bytes = s.as_bytes();
     if bytes.len() < 2 { return None; }
@@ -346,7 +346,7 @@ pub fn square_from_str(s: &str) -> Option<u8> {
     Some(make_square(file, rank))
 }
 
-/// Convertit un numéro de case en notation algébrique (ex: 28 → "e4").
+/// Converts a square number into algebraic notation (e.g., 28 → "e4").
 pub fn square_to_str(sq: u8) -> String {
     let file = file_of(sq);
     let rank = rank_of(sq);
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_case_coordonnees() {
-        // e4 = colonne 4, rang 3 → sq = 28
+        // e4 = file 4, rank 3 → sq = 28
         assert_eq!(make_square(4, 3), 28);
         assert_eq!(file_of(28), 4);
         assert_eq!(rank_of(28), 3);
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_promotion_uci() {
-        let m = Move::promotion(52, 60, 4); // e7 → e8 dame
+        let m = Move::promotion(52, 60, 4); // e7 → e8 queen
         assert_eq!(m.to_uci(), "e7e8q");
     }
 }

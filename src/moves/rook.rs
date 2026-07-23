@@ -1,24 +1,24 @@
 // =============================================================================
 // Vendetta Chess Motor — src/moves/rook.rs
 //
-// Rôle : Génère tous les pseudo-coups légaux des tours pour une couleur donnée.
-//        Utilise la fonction rook_attacks() qui calcule les cases attaquées
-//        en tenant compte des pièces bloquantes (approche classique par boucle).
+// Role: Generates all pseudo-legal rook moves for a given color.
+//        Uses the rook_attacks() function which computes the attacked squares
+//        while taking blocking pieces into account (classic loop-based approach).
 //
-// Contenu :
-//   - Coups silencieux (déplacement vers une case vide)
-//   - Captures (déplacement vers une case occupée par l'ennemi)
+// Content:
+//   - Quiet moves (move to an empty square)
+//   - Captures (move to a square occupied by the enemy)
 //
-// La tour se déplace en ligne droite (horizontal/vertical) sur autant de cases
-// que possible, s'arrêtant à la première pièce rencontrée.
+// The rook moves in a straight line (horizontal/vertical) across as many squares
+// as possible, stopping at the first piece encountered.
 // =============================================================================
 
 use crate::utils::types::{Color, Piece, Move};
 use crate::board::state::Board;
 use crate::board::bitboard::{pop_lsb, rook_attacks};
 
-/// Génère tous les pseudo-coups des tours de la couleur `color`.
-/// Les coups sont ajoutés au vecteur `moves`.
+/// Generates all pseudo-moves of the rooks of the color `color`.
+/// The moves are added to the `moves` vector.
 pub fn generate_rook_moves(board: &Board, color: Color, moves: &mut crate::moves::MoveList) {
     let mut rooks  = board.pieces[color.index()][Piece::Rook.index()];
     let own_pieces = board.occupancy[color.index()];

@@ -1,33 +1,33 @@
 // =============================================================================
 // Vendetta Chess Motor — src/bin/extract_positions.rs
 //
-// Rôle : Étape 1 du Texel Tuning. Lit le fichier PGN filtré (lichess_filtered_
-//        2026-05.pgn), rejoue chaque partie coup par coup avec le moteur lui-
-//        même (Board::make_move + génération légale pour résoudre la notation
-//        SAN), et échantillonne des positions à intervalles réguliers.
+// Role: Step 1 of Texel Tuning. Reads the filtered PGN file (lichess_filtered_
+//        2026-05.pgn), replays each game move by move with the engine it-
+//        self (Board::make_move + legal generation to resolve the
+//        SAN notation), and samples positions at regular intervals.
 //
-// Pourquoi une étape séparée :
-//   Rejouer 300 000 parties (parser le SAN, générer les coups légaux pour
-//   désambiguïser, etc.) est le poste le plus coûteux du pipeline de tuning.
-//   En sauvegardant le résultat (FEN + résultat de la partie) dans un fichier
-//   intermédiaire, on ne paie ce coût qu'UNE FOIS — toutes les itérations
-//   suivantes du tuner (coordinate descent sur des dizaines de passes) relisent
-//   directement ce fichier, sans jamais reparser de PGN ni régénérer de coups.
+// Why a separate step:
+//   Replaying 300,000 games (parsing SAN, generating legal moves to
+//   disambiguate, etc.) is the most expensive step of the tuning pipeline.
+//   By saving the result (FEN + game result) to an intermediate
+//   file, this cost is paid only ONCE — all subsequent
+//   iterations of the tuner (coordinate descent over dozens of passes) reread
+//   this file directly, without ever reparsing PGN or regenerating moves.
 //
-// Format de sortie (texte, une position par ligne) :
-//   <FEN>;<résultat>
-//   où résultat ∈ {1.0, 0.5, 0.0} du point de vue des BLANCS
-//   (1.0 = victoire Blancs, 0.5 = nulle, 0.0 = victoire Noirs)
+// Output format (text, one position per line):
+//   <FEN>;<result>
+//   where result ∈ {1.0, 0.5, 0.0} from WHITE's point of view
+//   (1.0 = White win, 0.5 = draw, 0.0 = Black win)
 //
-// Échantillonnage :
-//   - On ignore les SKIP_PLIES premiers demi-coups (théorie d'ouverture,
-//     peu représentatifs du jugement propre du moteur)
-//   - Une position est gardée tous les SAMPLE_INTERVAL demi-coups ensuite
-//   - Aucune position n'est gardée après un mat/pat évident en fin de PGN
-//     (le dernier coup n'a pas de position "après" utile à évaluer)
+// Sampling:
+//   - The first SKIP_PLIES half-moves are ignored (opening theory,
+//     not very representative of the engine's own judgment)
+//   - A position is kept every SAMPLE_INTERVAL half-moves after that
+//   - No position is kept after an obvious checkmate/stalemate at the end of the PGN
+//     (the last move has no useful "after" position to evaluate)
 //
-// Utilisation :
-//   cargo run --release --bin extract_positions -- <entrée.pgn> <sortie.txt>
+// Usage:
+//   cargo run --release --bin extract_positions -- <input.pgn> <output.txt>
 // =============================================================================
 
 use std::env;
@@ -40,19 +40,19 @@ use vendetta_chess_motor::board::state::Board;
 use vendetta_chess_motor::moves::generate_legal_moves;
 use vendetta_chess_motor::utils::types::{Move, MoveFlags, Piece};
 
-/// Ignorer les SKIP_PLIES premiers demi-coups de chaque partie (théorie
-/// d'ouverture connue, peu informative sur la qualité de l'évaluation).
+/// Ignore the first SKIP_PLIES half-moves of each game (known
+/// opening theory, not very informative about evaluation quality).
 const SKIP_PLIES: usize = 10;
 
-/// Échantillonner une position tous les SAMPLE_INTERVAL demi-coups après
-/// la zone d'ouverture ignorée ci-dessus.
+/// Sample a position every SAMPLE_INTERVAL half-moves after
+/// the opening zone ignored above.
 const SAMPLE_INTERVAL: usize = 8;
 
 // =============================================================================
-// Parsing SAN — résolution d'un coup en notation algébrique standard
+// SAN parsing — resolving a move in standard algebraic notation
 // =============================================================================
 
-/// Convertit un caractère de pièce SAN ('N','B','R','Q','K') en Piece.
+/// Converts a SAN piece character ('N','B','R','Q','K') into a Piece.
 fn piece_from_san_char(c: char) -> Option<Piece> {
     match c {
         'N' => Some(Piece::Knight),
@@ -64,17 +64,17 @@ fn piece_from_san_char(c: char) -> Option<Piece> {
     }
 }
 
-/// Résout un token SAN (ex: "Nf3", "exd5", "O-O", "e8=Q+") en un Move légal,
-/// en s'appuyant sur generate_legal_moves() pour la désambiguïsation.
+/// Resolves a SAN token (e.g. "Nf3", "exd5", "O-O", "e8=Q+") into a legal Move,
+/// relying on generate_legal_moves() for disambiguation.
 ///
-/// Principe : on ne réimplémente pas les règles des échecs ici — on génère
-/// tous les coups légaux de la position courante, puis on filtre ceux qui
-/// correspondent au token SAN (type de pièce, case d'arrivée, promotion,
-/// indices de désambiguïsation file/rang). Le moteur a déjà garanti que
-/// cette liste est correcte (perft 6/6) — la résolution SAN n'a donc qu'à
-/// trouver le coup correspondant, pas à revalider sa légalité.
+/// Principle: chess rules are not reimplemented here — instead we generate
+/// all legal moves of the current position, then filter those that
+/// match the SAN token (piece type, destination square, promotion,
+/// file/rank disambiguation hints). The engine has already guaranteed that
+/// this list is correct (perft 6/6) — SAN resolution therefore only needs to
+/// find the matching move, not revalidate its legality.
 fn resolve_san(board: &mut Board, raw: &str) -> Option<Move> {
-    // Nettoyer les annotations finales (+, #, !, ?) et espaces.
+    // Strip trailing annotations (+, #, !, ?) and spaces.
     let san: String = raw.trim().chars()
         .filter(|c| !matches!(c, '+' | '#' | '!' | '?'))
         .collect();
@@ -83,7 +83,7 @@ fn resolve_san(board: &mut Board, raw: &str) -> Option<Move> {
     let legal = generate_legal_moves(board);
     let side  = board.side_to_move;
 
-    // --- Roque ---
+    // --- Castling ---
     if san == "O-O" || san == "0-0" {
         return legal.into_iter().find(|m| m.flags == MoveFlags::CastleKingside);
     }
@@ -93,7 +93,7 @@ fn resolve_san(board: &mut Board, raw: &str) -> Option<Move> {
 
     let chars: Vec<char> = san.chars().collect();
 
-    // --- Promotion : suffixe "=X" ---
+    // --- Promotion: "=X" suffix ---
     let mut promo_piece: Option<Piece> = None;
     let mut body = san.clone();
     if let Some(eq_pos) = san.find('=') {
@@ -105,19 +105,19 @@ fn resolve_san(board: &mut Board, raw: &str) -> Option<Move> {
     let body_chars: Vec<char> = body.chars().collect();
     if body_chars.len() < 2 { return None; }
 
-    // --- Case d'arrivée : toujours les 2 derniers caractères du corps ---
+    // --- Destination square: always the last 2 characters of the body ---
     let dest_str: String = body_chars[body_chars.len() - 2..].iter().collect();
     let dest_sq = vendetta_chess_motor::utils::types::square_from_str(&dest_str)?;
 
-    // --- Type de pièce déplacée : lettre majuscule en tête, sinon Pion ---
+    // --- Type of piece moved: leading uppercase letter, otherwise Pawn ---
     let (piece_type, rest_start) = match body_chars[0] {
         'N' | 'B' | 'R' | 'Q' | 'K' => (piece_from_san_char(body_chars[0])?, 1),
         _ => (Piece::Pawn, 0),
     };
 
-    // --- Caractères de désambiguïsation entre la pièce et la case d'arrivée ---
-    // (file et/ou rang d'origine, capture 'x' ignorée — déjà gérée par le
-    // filtrage sur le bitboard de la pièce qui se déplace réellement)
+    // --- Disambiguation characters between the piece and the destination square ---
+    // (origin file and/or rank, capture 'x' ignored — already handled by
+    // filtering on the bitboard of the piece that actually moves)
     let disambig: Vec<char> = body_chars[rest_start..body_chars.len() - 2]
         .iter()
         .copied()
@@ -127,22 +127,22 @@ fn resolve_san(board: &mut Board, raw: &str) -> Option<Move> {
     let disambig_file = disambig.iter().find(|c| ('a'..='h').contains(c)).copied();
     let disambig_rank = disambig.iter().find(|c| ('1'..='8').contains(c)).copied();
 
-    // --- Filtrer les coups légaux correspondant à ce token ---
+    // --- Filter legal moves matching this token ---
     let candidates: Vec<Move> = legal.into_iter().filter(|mv| {
         if mv.to != dest_sq { return false; }
 
-        // La pièce qui bouge doit être du bon type et de la bonne couleur.
+        // The moving piece must be of the right type and the right color.
         match board.piece_at(mv.from) {
             Some((p, c)) if p == piece_type && c == side => {}
             _ => return false,
         }
 
-        // Promotion : doit correspondre si spécifiée.
+        // Promotion: must match if specified.
         if let Some(pp) = promo_piece {
             if mv.promotion_piece() != Some(pp) { return false; }
         }
 
-        // Désambiguïsation file/rang si fournie dans le SAN.
+        // File/rank disambiguation if provided in the SAN.
         if let Some(f) = disambig_file {
             if (b'a' + (mv.from % 8)) as char != f { return false; }
         }
@@ -156,23 +156,23 @@ fn resolve_san(board: &mut Board, raw: &str) -> Option<Move> {
     if candidates.len() == 1 {
         Some(candidates[0])
     } else {
-        // Désambiguïsation insuffisante (rare, SAN malformé) — on prend le
-        // premier candidat plutôt que d'échouer toute la partie.
+        // Insufficient disambiguation (rare, malformed SAN) — take the
+        // first candidate rather than failing the whole game.
         candidates.into_iter().next()
     }
 }
 
 // =============================================================================
-// Nettoyage des annotations Lichess ({ [%eval ...] [%clk ...] })
+// Cleanup of Lichess annotations ({ [%eval ...] [%clk ...] })
 // =============================================================================
 
-/// Retire tous les blocs entre accolades d'une ligne de movetext.
+/// Removes all brace-delimited blocks from a movetext line.
 ///
-/// Lichess insère des annotations après chaque coup, ex :
+/// Lichess inserts annotations after each move, e.g.:
 ///   "1. c3 { [%eval 0.0] [%clk 0:10:00] } 1... e5 { [%eval 0.15] [...] } ..."
-/// Les accolades PGN ne s'imbriquent jamais (pas de "{ { } }"), donc un
-/// simple compteur de profondeur suffit : on copie les caractères tant
-/// qu'on n'est pas à l'intérieur d'un bloc { }, et on ignore tout le reste.
+/// PGN braces never nest (no "{ { } }"), so a
+/// simple depth counter is enough: characters are copied as long
+/// as we are not inside a { } block, and everything else is ignored.
 fn strip_braced_comments(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut depth = 0u32;
@@ -181,14 +181,14 @@ fn strip_braced_comments(line: &str) -> String {
             '{' => depth += 1,
             '}' => { depth = depth.saturating_sub(1); }
             _ if depth == 0 => out.push(c),
-            _ => {} // à l'intérieur d'un commentaire : ignoré
+            _ => {} // inside a comment: ignored
         }
     }
     out
 }
 
 // =============================================================================
-// Point d'entrée
+// Entry point
 // =============================================================================
 
 fn main() {
@@ -208,7 +208,7 @@ fn main() {
     let out_file = File::create(output_path).expect("Impossible de créer le fichier de sortie");
     let mut writer = BufWriter::with_capacity(4 << 20, out_file);
 
-    let mut result: Option<f32> = None;     // résultat de la partie en cours (point de vue Blancs)
+    let mut result: Option<f32> = None;     // result of the current game (from White's point of view)
     let mut moves_san: Vec<String> = Vec::with_capacity(128);
 
     let mut games_seen:      u64 = 0;
@@ -218,7 +218,7 @@ fn main() {
 
     let start = Instant::now();
 
-    // Compteur de diagnostics affichés (limité à 5, pour ne pas noyer la sortie).
+    // Counter of displayed diagnostics (limited to 5, to avoid flooding the output).
     let mut debug_shown: u32 = 0;
 
     let flush_game = |result: Option<f32>, moves_san: &[String], writer: &mut BufWriter<File>,
@@ -263,7 +263,7 @@ fn main() {
         let line = line.expect("Erreur de lecture du fichier PGN");
 
         if line.starts_with("[Result ") {
-            // Nouvelle partie : d'abord clôturer la précédente.
+            // New game: first close out the previous one.
             flush_game(result, &moves_san, &mut writer, &mut games_replayed, &mut games_failed, &mut positions_kept, &mut debug_shown);
             games_seen += 1;
             moves_san.clear();
@@ -275,42 +275,42 @@ fn main() {
             } else if line.contains("1/2-1/2") {
                 Some(0.5)
             } else {
-                None // résultat inconnu ("*") — partie ignorée
+                None // unknown result ("*") — game skipped
             };
         } else if !line.starts_with('[') && !line.trim().is_empty() {
-            // Ligne de coups : Lichess insère des annotations entre accolades
-            // après chaque coup, ex: "1. c3 { [%eval 0.0] [%clk 0:10:00] } 1... e5 ...".
-            // Sans les retirer AVANT le découpage par espaces, chaque mot à
-            // l'intérieur ("{", "[%eval", "0.0]", "[%clk"...) serait inséré
-            // dans la liste des coups comme s'il s'agissait d'un coup SAN —
-            // c'est ce qui causait l'échec de quasiment toutes les parties.
+            // Move line: Lichess inserts annotations between braces
+            // after each move, e.g.: "1. c3 { [%eval 0.0] [%clk 0:10:00] } 1... e5 ...".
+            // Without removing them BEFORE splitting on spaces, each word
+            // inside ("{", "[%eval", "0.0]", "[%clk"...) would be inserted
+            // into the move list as if it were a SAN move —
+            // this is what caused nearly all games to fail.
             let cleaned = strip_braced_comments(&line);
 
-            // Tokens séparés par espaces, en retirant les numéros de coup
-            // ("12." ou "12...", collés ou non au coup qui suit).
+            // Tokens separated by spaces, stripping move numbers
+            // ("12." or "12...", whether or not attached to the following move).
             for token in cleaned.split_whitespace() {
                 let mut t = token.trim();
                 if t.is_empty() { continue; }
 
-                // IMPORTANT : vérifier le résultat AVANT le retrait du préfixe
-                // numérique. "1-0"/"0-1" commencent par un chiffre — si on les
-                // passait par le nettoyage de numéro de coup en premier, ils
-                // seraient mutilés ("1-0" → "-0") et ne correspondraient plus
-                // à aucune des chaînes ci-dessous, finissant poussés dans
-                // moves_san comme un faux coup en fin de partie (qui ferait
-                // alors échouer le replay malgré des coups réels tous corrects).
+                // IMPORTANT: check the result BEFORE stripping the
+                // numeric prefix. "1-0"/"0-1" start with a digit — if they
+                // went through the move-number cleanup first, they
+                // would be mangled ("1-0" → "-0") and would no longer match
+                // any of the strings below, ending up pushed into
+                // moves_san as a fake move at the end of the game (which would then
+                // cause the replay to fail despite all real moves being correct).
                 if t == "1-0" || t == "0-1" || t == "1/2-1/2" || t == "*" {
                     continue;
                 }
 
-                // Numéro de coup éventuel : "12.", "12...", ou collé sans
-                // espace au coup lui-même ("12.Nf3", "12...Nf3" — certains
-                // exports PGN ne mettent pas d'espace après le point). On ne
-                // jette que le préfixe numérique + points, jamais le coup.
+                // Possible move number: "12.", "12...", or attached without a
+                // space to the move itself ("12.Nf3", "12...Nf3" — some
+                // PGN exports don't put a space after the period). Only the
+                // numeric prefix + dots is discarded, never the move.
                 if t.chars().next().unwrap().is_ascii_digit() {
                     let after_digits = t.trim_start_matches(|c: char| c.is_ascii_digit());
                     let after_dots   = after_digits.trim_start_matches('.');
-                    if after_dots.is_empty() { continue; } // "12." seul, rien à garder
+                    if after_dots.is_empty() { continue; } // "12." alone, nothing to keep
                     t = after_dots;
                 }
 
@@ -325,7 +325,7 @@ fn main() {
             );
         }
     }
-    // Dernière partie du fichier.
+    // Last game in the file.
     flush_game(result, &moves_san, &mut writer, &mut games_replayed, &mut games_failed, &mut positions_kept, &mut debug_shown);
 
     writer.flush().expect("Erreur de vidage du buffer d'écriture");

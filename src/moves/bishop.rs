@@ -1,24 +1,24 @@
 // =============================================================================
 // Vendetta Chess Motor — src/moves/bishop.rs
 //
-// Rôle : Génère tous les pseudo-coups légaux des fous pour une couleur donnée.
-//        Utilise la fonction bishop_attacks() qui calcule les cases attaquées
-//        en tenant compte des pièces bloquantes (approche classique par boucle).
+// Role: Generates all pseudo-legal bishop moves for a given color.
+//        Uses the bishop_attacks() function which computes the attacked squares
+//        taking into account blocking pieces (classic loop-based approach).
 //
-// Contenu :
-//   - Coups silencieux (déplacement vers une case vide)
-//   - Captures (déplacement vers une case occupée par l'ennemi)
+// Contents:
+//   - Quiet moves (move to an empty square)
+//   - Captures (move to a square occupied by the enemy)
 //
-// Le fou se déplace en diagonale sur autant de cases que possible,
-// s'arrêtant à la première pièce rencontrée (qu'il peut capturer si ennemie).
+// The bishop moves diagonally as many squares as possible,
+// stopping at the first piece encountered (which it can capture if it is an enemy piece).
 // =============================================================================
 
 use crate::utils::types::{Color, Piece, Move};
 use crate::board::state::Board;
 use crate::board::bitboard::{pop_lsb, bishop_attacks};
 
-/// Génère tous les pseudo-coups des fous de la couleur `color`.
-/// Les coups sont ajoutés au vecteur `moves`.
+/// Generates all pseudo-moves for the bishops of color `color`.
+/// The moves are added to the `moves` vector.
 pub fn generate_bishop_moves(board: &Board, color: Color, moves: &mut crate::moves::MoveList) {
     let mut bishops = board.pieces[color.index()][Piece::Bishop.index()];
     let own_pieces  = board.occupancy[color.index()];
@@ -26,7 +26,7 @@ pub fn generate_bishop_moves(board: &Board, color: Color, moves: &mut crate::mov
 
     while bishops != 0 {
         let from    = pop_lsb(&mut bishops);
-        // Cases attaquées par le fou depuis cette case, en excluant nos propres pièces.
+        // Squares attacked by the bishop from this square, excluding our own pieces.
         let attacks = bishop_attacks(from, occupied) & !own_pieces;
 
         let mut bb = attacks;
