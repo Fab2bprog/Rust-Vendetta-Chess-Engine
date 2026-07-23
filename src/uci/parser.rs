@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/uci/parser.rs
+// Vendetta Chess Engine — src/uci/parser.rs
 //
 // Role: Parsing of UCI commands received on standard input.
 //        The UCI protocol communicates via text exchange over stdin/stdout.
@@ -25,7 +25,7 @@ use crate::utils::types::square_from_str;
 use crate::utils::types::Move;
 use crate::search::SearchConfig;
 
-/// UCI commands recognized by Vendetta Chess Motor.
+/// UCI commands recognized by Vendetta Chess Engine.
 #[derive(Debug)]
 pub enum UciCommand {
     /// Engine identification: "uci"
@@ -62,7 +62,7 @@ pub enum UciCommand {
         on: bool,
     },
     /// Engine registration: "register later|name <x> code <y>" (or "register").
-    /// Vendetta Chess Motor uses NO anti-copy protection: the command
+    /// Vendetta Chess Engine uses NO anti-copy protection: the command
     /// is accepted with no action. Declared explicitly to cover the entirety
     /// of the UCI spec's commands (instead of treating it as unknown).
     Register,

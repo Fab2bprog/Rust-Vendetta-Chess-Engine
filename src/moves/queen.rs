@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/moves/queen.rs
+// Vendetta Chess Engine — src/moves/queen.rs
 //
 // Role: Generates all pseudo-legal queen moves for a given color.
 //        The queen combines the movements of the bishop and the rook: it can

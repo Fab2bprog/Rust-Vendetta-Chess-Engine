@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/board/bitboard.rs
+// Vendetta Chess Engine — src/board/bitboard.rs
 //
 // Role: Defines the Bitboard type (u64) and all associated operations.
 //        A bitboard is a 64-bit integer where each bit represents a square

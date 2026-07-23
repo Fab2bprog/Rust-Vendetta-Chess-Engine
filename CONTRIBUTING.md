@@ -1,6 +1,6 @@
-# Contributing to Vendetta Chess Motor
+# Contributing to Vendetta Chess Engine
 
-Welcome! Vendetta Chess Motor is an open source project.
+Welcome! Vendetta Chess Engine is an open source project.
 Contributions are welcome.
 
 ## Conventions

@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/center.rs
+// Vendetta Chess Engine — src/eval/center.rs
 //
 // Role: Evaluation of control of the center of the chessboard.
 //        Controlling the center (d4, d5, e4, e5) is a fundamental principle

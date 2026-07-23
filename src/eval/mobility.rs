@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/mobility.rs
+// Vendetta Chess Engine — src/eval/mobility.rs
 //
 // Role: Evaluation of piece mobility AND center control by
 //        the pieces (knight, bishop, rook, queen) — both criteria are

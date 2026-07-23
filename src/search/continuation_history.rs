@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/search/continuation_history.rs
+// Vendetta Chess Engine — src/search/continuation_history.rs
 //
 // Role: Management of the "Continuation History" (continuation history,
 //        sometimes called "2-move history").

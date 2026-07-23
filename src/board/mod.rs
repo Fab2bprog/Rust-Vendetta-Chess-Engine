@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/board/mod.rs
+// Vendetta Chess Engine — src/board/mod.rs
 //
 // Role: Entry point of the board module. Re-exports the types and functions
 //        essential for other modules to easily access them.

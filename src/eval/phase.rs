@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/phase.rs
+// Vendetta Chess Engine — src/eval/phase.rs
 //
 // Role: Detection of the game phase (opening, middlegame, endgame).
 //        The phase influences several aspects of the evaluation:

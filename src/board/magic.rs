@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/board/magic.rs
+// Vendetta Chess Engine — src/board/magic.rs
 //
 // Role: Magic Bitboards for ultra-fast computation of sliding piece attacks
 //        (rook and bishop). Replaces the loops in bitboard.rs with a

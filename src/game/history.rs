@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/game/history.rs
+// Vendetta Chess Engine — src/game/history.rs
 //
 // Role: Tracking position history for repetition detection.
 //        The threefold repetition rule in chess states that a game is drawn

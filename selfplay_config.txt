@@ -1,5 +1,5 @@
 # =====================================================================
-# SPRT test config — Vendetta Chess Motor self-play (key = value format)
+# SPRT test config — Vendetta Chess Engine self-play (key = value format)
 # Convention: A = reference, B = candidate.  PASS = B's change adds Elo.
 # FAST setting for a first run (few nodes, modest cap).
 # =====================================================================

@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/main.rs
+// Vendetta Chess Engine — src/main.rs
 //
 // Role: Program entry point. Initializes the necessary tables
 //        and starts the main UCI loop.
@@ -12,8 +12,8 @@
 // It must not display a graphical interface or open a window.
 // =============================================================================
 
-use vendetta_chess_motor::board::bitboard::init_attack_tables;
-use vendetta_chess_motor::uci::UciEngine;
+use vendetta_chess_engine::board::bitboard::init_attack_tables;
+use vendetta_chess_engine::uci::UciEngine;
 
 fn main() {
     // Initialize the precomputed attack tables for the knight and king.

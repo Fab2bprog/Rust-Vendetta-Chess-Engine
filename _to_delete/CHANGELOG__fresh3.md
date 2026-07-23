@@ -1,19 +1,10 @@
-# Changelog — Vendetta Chess Engine
+# Changelog — Vendetta Chess Motor
 
 All notable changes to the project are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com/),
 semantic versioning [SemVer](https://semver.org/).
 
 ---
-
-## [Unreleased]
-
-### Changed
-- **Project renamed from "Vendetta Chess Motor" to "Vendetta Chess Engine"**,
-  everywhere: Cargo package (`vendetta_chess_motor` → `vendetta-chess-engine`,
-  Rust identifier `vendetta_chess_engine`), main binary, UCI identification
-  (`id name Vendetta Chess Motor` → `id name Vendetta Chess Engine`), and all
-  documentation/source headers.
 
 ## [1.1.2] — 2026-06-26
 

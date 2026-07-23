@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/board/state.rs
+// Vendetta Chess Engine — src/board/state.rs
 //
 // Role: Complete representation of a chess position's state.
 //        It is the central structure of the engine around which everything revolves.

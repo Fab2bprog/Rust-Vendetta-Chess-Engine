@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/bin/selfplay.rs
+// Vendetta Chess Engine — src/bin/selfplay.rs
 //
 // Role: Measure whether a change to the engine ADDS Elo, via a test
 //        SPRT in internal self-play (the engine plays against itself, two
@@ -30,19 +30,19 @@ use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::thread;
 use std::time::Duration;
 
-use vendetta_chess_motor::board::state::Board;
-use vendetta_chess_motor::board::bitboard::init_attack_tables;
-use vendetta_chess_motor::search::transposition::TranspositionTable;
-use vendetta_chess_motor::search::killers::KillerMoves;
-use vendetta_chess_motor::search::history::HistoryTable;
-use vendetta_chess_motor::search::countermove::CountermoveTable;
-use vendetta_chess_motor::search::continuation_history::ContinuationHistoryTable;
-use vendetta_chess_motor::search::alphabeta::alpha_beta;
-use vendetta_chess_motor::search::SearchInfo;
-use vendetta_chess_motor::utils::types::{Color, Move, SCORE_MATE};
-use vendetta_chess_motor::moves::generate_legal_moves;
-use vendetta_chess_motor::game::Game;
-use vendetta_chess_motor::game::rules::GameResult;
+use vendetta_chess_engine::board::state::Board;
+use vendetta_chess_engine::board::bitboard::init_attack_tables;
+use vendetta_chess_engine::search::transposition::TranspositionTable;
+use vendetta_chess_engine::search::killers::KillerMoves;
+use vendetta_chess_engine::search::history::HistoryTable;
+use vendetta_chess_engine::search::countermove::CountermoveTable;
+use vendetta_chess_engine::search::continuation_history::ContinuationHistoryTable;
+use vendetta_chess_engine::search::alphabeta::alpha_beta;
+use vendetta_chess_engine::search::SearchInfo;
+use vendetta_chess_engine::utils::types::{Color, Move, SCORE_MATE};
+use vendetta_chess_engine::moves::generate_legal_moves;
+use vendetta_chess_engine::game::Game;
+use vendetta_chess_engine::game::rules::GameResult;
 
 // --- Internal constants -----------------------------------------------------
 const SELFPLAY_TT_MB:     usize = 8;   // small TT per side (shallow search)
@@ -404,7 +404,7 @@ fn write_report(cfg: &Config, w: u64, d: u64, l: u64, llr_val: f64, upper: f64, 
         "résultat partiel — relancer pour conclure"
     };
     let content = format!(
-"# Rapport SPRT Vendetta Chess Motor (point de vue B = candidat)
+"# Rapport SPRT Vendetta Chess Engine (point de vue B = candidat)
 statut              = {statut}
 verdict             = {verdict}
 
@@ -468,7 +468,7 @@ fn main() {
     // Clean up any leftover STOP file from a previous run.
     let _ = fs::remove_file(STOP_FILE);
 
-    println!("=== SPRT self-play Vendetta Chess Motor ===");
+    println!("=== SPRT self-play Vendetta Chess Engine ===");
     println!("config            : {}", config_path);
     println!("A (référence)     : nodes={}  improving={}  futility={}  lmr={}  correction={}  king_attack={}", cfg.nodes_a, cfg.improving_a, cfg.futility_a, cfg.lmr_a, cfg.correction_a, cfg.king_attack_a);
     println!("B (candidat)      : nodes={}  improving={}  futility={}  lmr={}  correction={}  king_attack={}", cfg.nodes_b, cfg.improving_b, cfg.futility_b, cfg.lmr_b, cfg.correction_b, cfg.king_attack_b);

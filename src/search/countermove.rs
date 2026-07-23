@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/search/countermove.rs
+// Vendetta Chess Engine — src/search/countermove.rs
 //
 // Role: Management of the "Countermove" heuristic (refutation move).
 //        Idea: if a certain type of opponent move (e.g.: "the knight goes to

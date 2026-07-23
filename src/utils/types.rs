@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/utils/types.rs
+// Vendetta Chess Engine — src/utils/types.rs
 //
 // Role: Defines all the fundamental types shared across the entire project.
 //        This file is the foundation of everything — Color, Piece, Square, Move and the

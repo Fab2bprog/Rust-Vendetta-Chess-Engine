@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/bin/tuner.rs
+// Vendetta Chess Engine — src/bin/tuner.rs
 //
 // Role: Texel Tuning — automatically calibrates a subset of the
 //        evaluation constants on the positions file produced by
@@ -50,14 +50,14 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::time::Instant;
 
-use vendetta_chess_motor::board::bitboard::{
+use vendetta_chess_engine::board::bitboard::{
     init_attack_tables,
     knight_attacks, bishop_attacks, rook_attacks, queen_attacks, king_attacks,
     white_pawn_attacks, black_pawn_attacks, file_mask,
 };
-use vendetta_chess_motor::board::state::Board;
-use vendetta_chess_motor::utils::types::{Color, Piece};
-use vendetta_chess_motor::eval::tables::{
+use vendetta_chess_engine::board::state::Board;
+use vendetta_chess_engine::utils::types::{Color, Piece};
+use vendetta_chess_engine::eval::tables::{
     mirror_square, PAWN_TABLE, KNIGHT_TABLE, BISHOP_TABLE, ROOK_TABLE, QUEEN_TABLE,
 };
 

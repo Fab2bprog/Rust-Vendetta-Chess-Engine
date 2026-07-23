@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/bin/benchmark.rs
+// Vendetta Chess Engine — src/bin/benchmark.rs
 //
 // Role: Measure the engine's real performance in game conditions.
 //
@@ -25,16 +25,16 @@
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::time::{Duration, Instant};
-use vendetta_chess_motor::board::state::Board;
-use vendetta_chess_motor::board::bitboard::init_attack_tables;
-use vendetta_chess_motor::search::transposition::TranspositionTable;
-use vendetta_chess_motor::search::killers::KillerMoves;
-use vendetta_chess_motor::search::history::HistoryTable;
-use vendetta_chess_motor::search::countermove::CountermoveTable;
-use vendetta_chess_motor::search::continuation_history::ContinuationHistoryTable;
-use vendetta_chess_motor::search::alphabeta::alpha_beta;
-use vendetta_chess_motor::search::SearchInfo;
-use vendetta_chess_motor::utils::types::{Move, SCORE_MATE};
+use vendetta_chess_engine::board::state::Board;
+use vendetta_chess_engine::board::bitboard::init_attack_tables;
+use vendetta_chess_engine::search::transposition::TranspositionTable;
+use vendetta_chess_engine::search::killers::KillerMoves;
+use vendetta_chess_engine::search::history::HistoryTable;
+use vendetta_chess_engine::search::countermove::CountermoveTable;
+use vendetta_chess_engine::search::continuation_history::ContinuationHistoryTable;
+use vendetta_chess_engine::search::alphabeta::alpha_beta;
+use vendetta_chess_engine::search::SearchInfo;
+use vendetta_chess_engine::utils::types::{Move, SCORE_MATE};
 
 // =============================================================================
 // Benchmark positions
@@ -253,7 +253,7 @@ fn main() {
     // Header
     println!();
     println!("╔══════════════════════════════════════════════════════════════════════════╗");
-    println!("║         Vendetta Chess Motor — Benchmark de performance                        ║");
+    println!("║         Vendetta Chess Engine — Benchmark de performance                        ║");
     println!("╚══════════════════════════════════════════════════════════════════════════╝");
     println!();
     println!("  CPU        : {} cœurs disponibles", cpu_threads);

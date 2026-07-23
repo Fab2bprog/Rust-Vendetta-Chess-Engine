@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/bin/perft.rs
+// Vendetta Chess Engine — src/bin/perft.rs
 //
 // Role: Move generation validation tool using the Perft method.
 //
@@ -36,8 +36,8 @@
 // =============================================================================
 
 use std::time::Instant;
-use vendetta_chess_motor::board::state::Board;
-use vendetta_chess_motor::moves::{perft, perft_divide};
+use vendetta_chess_engine::board::state::Board;
+use vendetta_chess_engine::moves::{perft, perft_divide};
 
 // =============================================================================
 // Reference positions
@@ -283,7 +283,7 @@ fn main() {
     // --- Full suite mode (default) ---
     println!();
     println!("╔══════════════════════════════════════════════════════════════════════╗");
-    println!("║         Vendetta Chess Motor — Suite de validation Perft                   ║");
+    println!("║         Vendetta Chess Engine — Suite de validation Perft                   ║");
     println!("║         6 positions standard · Chess Programming Wiki               ║");
     println!("╚══════════════════════════════════════════════════════════════════════╝");
     println!();

@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/moves/knight.rs
+// Vendetta Chess Engine — src/moves/knight.rs
 //
 // Role: Generates all pseudo-legal knight moves for a color.
 //        Uses the precomputed attack table (knight_attacks) for

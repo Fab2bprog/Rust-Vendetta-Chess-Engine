@@ -1,10 +1,10 @@
-# Vendetta Chess Engine Architecture
+# Vendetta Chess Motor Architecture
 
 > Version 1.1.2 · MIT License
 
 ## Overview
 
-Vendetta Chess Engine is organized into independent modules that can be tested separately.
+Vendetta Chess Motor is organized into independent modules that can be tested separately.
 The dependency between modules follows a strict hierarchy to avoid cycles.
 No external dependencies — standard Rust only.
 
@@ -282,14 +282,14 @@ UCI (Universal Chess Interface) communication protocol.
 
 #### UCI extensions (beyond the strict minimum required)
 
-Added after a compliance audit — Vendetta Chess Engine already supported all
+Added after a compliance audit — Vendetta Chess Motor already supported all
 mandatory commands; these additions cover use cases and standard
 conventions useful for interoperability with a wider range of GUIs/platforms:
 
 - **`UCI_LimitStrength` + `UCI_Elo`** (`search::elo_to_skill_level()`) —
   linear interpolation 600-2600 Elo → levels 1-64 (the existing Skill
   Level scale). Lets standard GUIs/platforms (e.g. Lichess
-  bot hosting) limit Vendetta Chess Engine's strength without knowing the custom
+  bot hosting) limit Vendetta Chess Motor's strength without knowing the custom
   "Skill Level" option. Priority in the Go command: `UCI_AnalyseMode` >
   `UCI_LimitStrength` > `Skill Level`.
 - **`go nodes <x>`** — `SearchInfo.max_nodes`, checked in `check_time()`
@@ -452,7 +452,7 @@ text file. Separates the cost of PGN parsing (done once) from the
 cost of tuning (repeated at every coordinate descent pass).
 
 The input PGN file is itself prepared beforehand by `filter_pgn.rs` —
-a **standalone tool, outside this project's repository** (in the project's
+a **standalone tool, outside the vendetta_chess_motor repository** (in the project's
 root folder), which filters a monthly Lichess dump (.pgn.zst) by the Elo of both
 players and the time control (Rapid/Classical), streaming decompression via the
 `zstd` subprocess — zero added Cargo dependency. Direct compilation:
@@ -545,13 +545,13 @@ this file — only the final VALUES are extracted from it, manually.
 Perft re-verified after applying: 6/6 PASS (change limited to
 the evaluation).
 
-**Validation confirmed by real games**: after applying it, Vendetta Chess Engine
+**Validation confirmed by real games**: after applying it, Vendetta Chess Motor
 beat Stockfish successively set to 2100, 2300, then 2500 limited Elo.
 Playing strength now estimated at ~2,600 Elo (see README.md). The drop in
 the "king in center" penalty (-30 → -7) translated concretely into a
 noticeably more active white king in the middlegame/endgame in the games
 observed — risky behavior in theory, but one that has not caused any
-problem in the games played so far (positions where Vendetta Chess Engine already
+problem in the games played so far (positions where Vendetta Chess Motor already
 had the advantage). Worth watching if unexpected losses appear.
 
 **Performance measurements on Apple M2 Pro (10 cores):** K calibration ≈ 3.4s,

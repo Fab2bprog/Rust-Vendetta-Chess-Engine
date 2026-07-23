@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/search/history.rs
+// Vendetta Chess Engine — src/search/history.rs
 //
 // Role: Management of the history heuristic (History Heuristic).
 //        Each move that caused a beta cutoff has its score increased

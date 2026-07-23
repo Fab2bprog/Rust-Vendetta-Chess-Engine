@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/utils/mod.rs
+// Vendetta Chess Engine — src/utils/mod.rs
 //
 // Role: Utilities module. Entry point for all common types and
 //        functions shared throughout the entire project.

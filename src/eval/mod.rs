@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/mod.rs
+// Vendetta Chess Engine — src/eval/mod.rs
 //
 // Role: Main evaluation function. Combines all evaluation
 //        criteria into a single score representing the quality of the position

@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/moves/rook.rs
+// Vendetta Chess Engine — src/moves/rook.rs
 //
 // Role: Generates all pseudo-legal rook moves for a given color.
 //        Uses the rook_attacks() function which computes the attacked squares

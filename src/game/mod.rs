@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/game/mod.rs
+// Vendetta Chess Engine — src/game/mod.rs
 //
 // Role: Manages the current game. Coordinates the board state, the history
 //        of positions, and checks the game-ending conditions.

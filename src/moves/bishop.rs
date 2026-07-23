@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/moves/bishop.rs
+// Vendetta Chess Engine — src/moves/bishop.rs
 //
 // Role: Generates all pseudo-legal bishop moves for a given color.
 //        Uses the bishop_attacks() function which computes the attacked squares

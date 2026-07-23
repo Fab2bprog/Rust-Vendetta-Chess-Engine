@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/moves/mod.rs
+// Vendetta Chess Engine — src/moves/mod.rs
 //
 // Role: Coordinator of move generation. This module is the main entry
 //        point for obtaining the list of legal moves of a

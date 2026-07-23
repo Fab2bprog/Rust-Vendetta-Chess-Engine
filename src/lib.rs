@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/lib.rs
+// Vendetta Chess Engine — src/lib.rs
 //
 // Role: Root of the library. Declares all the project's modules and
 //        re-exports them to facilitate their use in tests and

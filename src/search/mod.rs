@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/search/mod.rs
+// Vendetta Chess Engine — src/search/mod.rs
 //
 // Role: Search coordinator. Implements iterative deepening,
 //        Lazy SMP multi-threading, time management, difficulty
@@ -961,7 +961,7 @@ fn compute_time_limit(board: &Board, config: &SearchConfig) -> Duration {
 // =============================================================================
 
 /// Minimum and maximum Elo covered by the UCI_Elo → skill_level conversion.
-/// ELO_MAX = ~2600, consistent with the measured playing strength of Vendetta Chess Motor
+/// ELO_MAX = ~2600, consistent with the measured playing strength of Vendetta Chess Engine
 /// (confirmed wins against Stockfish at 2500 Elo limited after the Texel
 /// Tuning v3 — see CLAUDE.md / README.md). ELO_MIN = 600, reasonable
 /// lower bound for an "absolute beginner" (skill_level = 1).
@@ -975,7 +975,7 @@ pub const ELO_MAX: u16 = 2600;
 /// would require hundreds of games per tier to be rigorous) —
 /// it is a reasonable mapping allowing GUIs/platforms
 /// using the standard UCI_LimitStrength + UCI_Elo mechanism to limit
-/// Vendetta Chess Motor, rather than having to know the custom option
+/// Vendetta Chess Engine, rather than having to know the custom option
 /// "Skill Level". Outside the range, the value is clamped.
 pub fn elo_to_skill_level(elo: u16) -> u8 {
     let elo = elo.clamp(ELO_MIN, ELO_MAX);

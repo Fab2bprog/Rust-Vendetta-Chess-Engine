@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/game/rules.rs
+// Vendetta Chess Engine — src/game/rules.rs
 //
 // Role: Verification of end-of-game rules that are not handled
 //        directly by move generation.

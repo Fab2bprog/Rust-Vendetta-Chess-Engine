@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/endgame.rs
+// Vendetta Chess Engine — src/eval/endgame.rs
 //
 // Role: Endgame-specific evaluations.
 //        These six criteria give the engine a deep understanding

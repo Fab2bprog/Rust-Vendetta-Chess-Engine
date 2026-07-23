@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/search/alphabeta.rs
+// Vendetta Chess Engine — src/search/alphabeta.rs
 //
 // Role: Alpha-beta search algorithm with all its heuristics.
 //        This is the heart of the engine's intelligence.
@@ -610,7 +610,7 @@ fn draw_score(contempt: i32, ply: usize) -> i32 {
 // Main alpha-beta search
 // =============================================================================
 
-/// Alpha-beta search with all the heuristics of Vendetta Chess Motor.
+/// Alpha-beta search with all the heuristics of Vendetta Chess Engine.
 ///
 /// Parameters:
 ///   - board         : current position (modified then restored)

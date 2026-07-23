@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/material.rs
+// Vendetta Chess Engine — src/eval/material.rs
 //
 // Role: Defines the material values of the pieces and calculates the
 //        material imbalance between the two sides.

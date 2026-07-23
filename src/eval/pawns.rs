@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/pawns.rs
+// Vendetta Chess Engine — src/eval/pawns.rs
 //
 // Role: Pawn structure evaluation.
 //        Pawn structure is fundamental in chess: it determines

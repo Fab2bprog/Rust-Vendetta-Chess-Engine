@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/search/see.rs
+// Vendetta Chess Engine — src/search/see.rs
 //
 // Role: Static Exchange Evaluation (SEE).
 //        Evaluates the net result of a sequence of captures on a square,
@@ -7,7 +7,7 @@
 //        Least Valuable Attacker). Each side can choose to stop the
 //        sequence if it would lose material by continuing.
 //
-// Usage in Vendetta Chess Motor:
+// Usage in Vendetta Chess Engine:
 //   1. Ordering of captures in move_score()
 //      → Winning captures (SEE ≥ 0) before quiet moves.
 //      → Losing captures (SEE < 0) after quiet moves.

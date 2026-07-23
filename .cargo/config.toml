@@ -1,5 +1,5 @@
 # =============================================================================
-# Vendetta Chess Motor — local Cargo configuration
+# Vendetta Chess Engine — local Cargo configuration
 #
 # target-cpu=native: allows the compiler to use ALL instructions of the
 # COMPILING processor (here an Apple M2 Pro, aarch64), instead of sticking

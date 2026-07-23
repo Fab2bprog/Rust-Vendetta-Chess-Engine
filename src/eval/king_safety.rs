@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/king_safety.rs
+// Vendetta Chess Engine — src/eval/king_safety.rs
 //
 // Role: King safety evaluation.
 //        A poorly protected king is a major weakness in chess.

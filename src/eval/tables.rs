@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/tables.rs
+// Vendetta Chess Engine — src/eval/tables.rs
 //
 // Role: Position tables (PST) and pure lookup functions.
 //        This file NEVER imports board::state — it must remain accessible

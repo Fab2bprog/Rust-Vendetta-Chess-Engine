@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/moves/pawn.rs
+// Vendetta Chess Engine — src/moves/pawn.rs
 //
 // Role: Generates all pseudo-legal pawn moves for a given color.
 //        Pseudo-legal moves may leave the king in check — they will be

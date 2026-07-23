@@ -1,4 +1,4 @@
-# SPRT report Vendetta Chess Motor (from B's point of view = candidate)
+# SPRT report Vendetta Chess Engine (from B's point of view = candidate)
 status              = SPRT_CONCLUDED_FAIL
 verdict             = revert the change (no gain)
 

@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/search/killers.rs
+// Vendetta Chess Engine — src/search/killers.rs
 //
 // Role: Management of "killer moves".
 //        A killer move is a quiet move (no capture) that caused a

@@ -149,8 +149,8 @@ Lazy SMP scales nearly linearly up to 4 threads and reaches ×7.75 on 10 cores (
 ### Standard build
 
 ```bash
-git clone https://github.com/Fab2bprog/Rust-Vendetta-Chess-Engine.git
-cd Rust-Vendetta-Chess-Engine
+git clone https://github.com/Fab2bprog/Rust-Vendetta-Chess-Motor.git
+cd Rust-Vendetta-Chess-Motor
 cargo build --release
 ```
 

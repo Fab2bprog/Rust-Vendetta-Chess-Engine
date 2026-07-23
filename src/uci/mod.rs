@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/uci/mod.rs
+// Vendetta Chess Engine — src/uci/mod.rs
 //
 // Role: Complete implementation of the UCI (Universal Chess Interface) protocol.
 //        Main communication loop between the engine and the graphical
@@ -33,7 +33,7 @@
 //          → "bestmove <best_move_in_ponder_position>" is sent
 //          → the GUI will then send "position" + "go" for the actual position
 //
-// UCI options of Vendetta Chess Motor:
+// UCI options of Vendetta Chess Engine:
 //   - Hash (MB)      : transposition table size (default 16 MB)
 //   - Skill Level    : difficulty level 1-64 (default 64 = full strength)
 //   - Threads        : number of search threads (default = available cores)
@@ -56,7 +56,7 @@ use crate::utils::types::Move;
 use parser::{parse_command, parse_move_uci, UciCommand};
 
 /// Engine name and version.
-pub const ENGINE_NAME:    &str = "Vendetta Chess Motor";
+pub const ENGINE_NAME:    &str = "Vendetta Chess Engine";
 pub const ENGINE_VERSION: &str = "1.1.2";
 /// Project author. Developed in coworking with Claude (Anthropic) — see
 /// the "Acknowledgments" section of README.md for the honest details of this
@@ -79,7 +79,7 @@ pub struct UciEngine {
     /// true if "UCI_LimitStrength" is enabled: in that case, `elo` takes
     /// precedence over `skill_level` to determine playing strength (see the
     /// Go command). Allows standard GUIs/platforms to limit
-    /// Vendetta Chess Motor without knowing the custom "Skill Level" option.
+    /// Vendetta Chess Engine without knowing the custom "Skill Level" option.
     limit_strength: bool,
     /// Target strength in Elo when `limit_strength` is active ("UCI_Elo" option).
     elo: u16,
@@ -329,7 +329,7 @@ impl UciEngine {
                 }
 
                 UciCommand::Register => {
-                    // Vendetta Chess Motor has NO anti-copy protection: it
+                    // Vendetta Chess Engine has NO anti-copy protection: it
                     // accepts the command without doing anything. The spec forbids
                     // issuing a "registration" response if the engine does not
                     // need one — hence no-op. Reported only in debug mode.
@@ -586,7 +586,7 @@ impl UciEngine {
                     // modest setups.
                     let requested = size.clamp(1, 32768);
 
-                    // GRACEFUL FALLBACK (Vendetta Chess Motor's robustness priority):
+                    // GRACEFUL FALLBACK (Vendetta Chess Engine's robustness priority):
                     // we try the requested size, then HALVE IT repeatedly as long
                     // as the allocation fails — instead of crashing. The TT is
                     // allocated as one block: a Hash setting larger than the available

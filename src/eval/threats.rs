@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/threats.rs
+// Vendetta Chess Engine — src/eval/threats.rs
 //
 // Role: Static threat detection — penalizes a piece attacked by an
 //        opposing piece of lesser value, or an undefended piece attacked

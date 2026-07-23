@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/bin/extract_positions.rs
+// Vendetta Chess Engine — src/bin/extract_positions.rs
 //
 // Role: Step 1 of Texel Tuning. Reads the filtered PGN file (lichess_filtered_
 //        2026-05.pgn), replays each game move by move with the engine it-
@@ -35,10 +35,10 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::time::Instant;
 
-use vendetta_chess_motor::board::bitboard::init_attack_tables;
-use vendetta_chess_motor::board::state::Board;
-use vendetta_chess_motor::moves::generate_legal_moves;
-use vendetta_chess_motor::utils::types::{Move, MoveFlags, Piece};
+use vendetta_chess_engine::board::bitboard::init_attack_tables;
+use vendetta_chess_engine::board::state::Board;
+use vendetta_chess_engine::moves::generate_legal_moves;
+use vendetta_chess_engine::utils::types::{Move, MoveFlags, Piece};
 
 /// Ignore the first SKIP_PLIES half-moves of each game (known
 /// opening theory, not very informative about evaluation quality).
@@ -107,7 +107,7 @@ fn resolve_san(board: &mut Board, raw: &str) -> Option<Move> {
 
     // --- Destination square: always the last 2 characters of the body ---
     let dest_str: String = body_chars[body_chars.len() - 2..].iter().collect();
-    let dest_sq = vendetta_chess_motor::utils::types::square_from_str(&dest_str)?;
+    let dest_sq = vendetta_chess_engine::utils::types::square_from_str(&dest_str)?;
 
     // --- Type of piece moved: leading uppercase letter, otherwise Pawn ---
     let (piece_type, rest_start) = match body_chars[0] {

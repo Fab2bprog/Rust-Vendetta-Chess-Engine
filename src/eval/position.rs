@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/eval/position.rs
+// Vendetta Chess Engine — src/eval/position.rs
 //
 // Role: Position tables (Piece-Square Tables).
 //        Each table gives a positional bonus or penalty to a piece depending on

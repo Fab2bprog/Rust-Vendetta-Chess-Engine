@@ -1,6 +1,6 @@
-# Vendetta Chess Engine
+# Vendetta Chess Motor
 
-**Vendetta Chess Engine** is a professional chess engine written entirely in Rust, compatible with the UCI (*Universal Chess Interface*) protocol. It can be used with any UCI-compatible graphical interface: Arena, CuteChess, Scid, Lichess BOT, etc.
+**Vendetta Chess Motor** is a professional chess engine written entirely in Rust, compatible with the UCI (*Universal Chess Interface*) protocol. It can be used with any UCI-compatible graphical interface: Arena, CuteChess, Scid, Lichess BOT, etc.
 
 > **Version 1.1.2** · MIT License · Pure Rust, no external dependencies
 
@@ -8,7 +8,7 @@
 
 ## About
 
-Vendetta Chess Engine was born from the philosophy of **stability and correctness before performance**. Its name pays tribute to Corsica (*the vendetta*), the Rust language (*robustness*), and chess (*Chess*).
+Vendetta Chess Motor was born from the philosophy of **stability and correctness before performance**. Its name pays tribute to Corsica (*the vendetta*), the Rust language (*robustness*), and chess (*Chess*).
 
 The engine is written in standard Rust, with no external dependencies. The Rust compiler eliminates entire categories of bugs at compile time that crash C++ engines in production: null dereferences, *use-after-free*, and *data races* between threads. Robustness isn't an option — it's guaranteed by the language.
 
@@ -149,8 +149,8 @@ Lazy SMP scales nearly linearly up to 4 threads and reaches ×7.75 on 10 cores (
 ### Standard build
 
 ```bash
-git clone https://github.com/Fab2bprog/Rust-Vendetta-Chess-Engine.git
-cd Rust-Vendetta-Chess-Engine
+git clone https://github.com/<your-account>/vendetta_chess_motor.git
+cd vendetta_chess_motor
 cargo build --release
 ```
 
@@ -166,11 +166,11 @@ cargo build --release --target aarch64-apple-darwin
 
 ## Usage
 
-Vendetta Chess Engine is a pure UCI engine — it has no graphical interface of its own. It is used with UCI-compatible software:
+Vendetta Chess Motor is a pure UCI engine — it has no graphical interface of its own. It is used with UCI-compatible software:
 
 1. Build the engine in release mode
 2. In your graphical interface (Arena, CuteChess, Scid, etc.), add a new engine pointing to the `vendetta-chess-engine` binary
-3. The engine identifies itself as: `id name Vendetta Chess Engine 1.1.2`
+3. The engine identifies itself as: `id name Vendetta Chess Motor 1.1.2`
 
 ### UCI options
 
@@ -190,7 +190,7 @@ Vendetta Chess Engine is a pure UCI engine — it has no graphical interface of 
 | `Contempt` | spin | 0 | -100 – 100 | Slightly penalizes draws (centipawns) — 0 = unchanged behavior. Useful against a weaker opponent |
 | `UCI_EngineAbout` | string | — | — | Information about the engine (read-only, no effect) |
 
-**Additional `go` commands**: in addition to the standard parameters (`wtime`, `btime`, `depth`, `movetime`, `infinite`, `searchmoves`...), Vendetta Chess Engine accepts `go nodes <x>` (limit by node count) and `go mate <x>` (search for a forced mate in x moves).
+**Additional `go` commands**: in addition to the standard parameters (`wtime`, `btime`, `depth`, `movetime`, `infinite`, `searchmoves`...), Vendetta Chess Motor accepts `go nodes <x>` (limit by node count) and `go mate <x>` (search for a forced mate in x moves).
 
 ### Difficulty levels
 
@@ -333,7 +333,7 @@ src/
 
 ## License
 
-Vendetta Chess Engine is distributed under the **MIT License**.
+Vendetta Chess Motor is distributed under the **MIT License**.
 
 You are free to use, modify, distribute, and even sublicense or sell copies of the software, in both open-source and closed-source/commercial projects, as long as the original copyright notice and this permission notice are included in all copies or substantial portions of the software. The software is provided "as is", without warranty of any kind.
 

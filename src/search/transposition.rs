@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/search/transposition.rs
+// Vendetta Chess Engine — src/search/transposition.rs
 //
 // Role: Thread-safe, lock-free transposition table (TT).
 //        Cache of already-analyzed positions. Shared across all threads

@@ -1,5 +1,5 @@
 // =============================================================================
-// Vendetta Chess Motor — src/moves/king.rs
+// Vendetta Chess Engine — src/moves/king.rs
 //
 // Role: Generates all pseudo-legal king moves for a given color.
 //        Handles normal moves AND castling (kingside and queenside).
